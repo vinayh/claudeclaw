@@ -277,7 +277,7 @@ function guildTriggerReason(message: DiscordMessage): string | null {
   const threadInfo = knownThreads.get(message.channel_id);
   if (threadInfo && config.listenChannels.includes(threadInfo.parentId)) return "listen_channel_thread";
 
-  return null;
+  return "guild_message";
 }
 
 // --- Attachment handling ---
@@ -636,8 +636,10 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
     }
 
     const prefixedPrompt = promptParts.join("\n");
-    // Use thread-specific session if message is in a known thread
-    const threadId = knownThreads.has(channelId) ? channelId : undefined;
+    // listenChannels use global session; all other guild channels/threads get their own session
+    const discordConfig = getSettings().discord;
+    const isListenChannel = discordConfig.listenChannels.includes(channelId);
+    const threadId = (isGuild && !isListenChannel) ? channelId : undefined;
     const result = await runUserMessage("discord", prefixedPrompt, threadId);
 
     if (result.exitCode !== 0) {

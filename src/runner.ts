@@ -124,7 +124,8 @@ async function runClaudeOnce(
   model: string,
   api: string,
   baseEnv: Record<string, string>,
-  timeoutMs: number = CLAUDE_TIMEOUT_MS
+  timeoutMs: number = CLAUDE_TIMEOUT_MS,
+  cwd?: string
 ): Promise<{ rawStdout: string; stderr: string; exitCode: number }> {
   const args = [...baseArgs];
   const normalizedModel = model.trim().toLowerCase();
@@ -134,6 +135,7 @@ async function runClaudeOnce(
     stdout: "pipe",
     stderr: "pipe",
     env: buildChildEnv(baseEnv, model, api),
+    cwd: cwd ?? PROJECT_DIR,
   });
 
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -172,6 +174,12 @@ async function runClaudeOnce(
 }
 
 const PROJECT_DIR = process.cwd();
+const SESSIONS_BASE = join(process.cwd(), ".claude", "claudeclaw", "sessions");
+
+function getSessionCwd(threadId?: string): string {
+  if (!threadId) return PROJECT_DIR;
+  return join(SESSIONS_BASE, threadId);
+}
 
 const DIR_SCOPE_PROMPT = [
   `CRITICAL SECURITY CONSTRAINT: You are scoped to the project directory: ${PROJECT_DIR}`,
@@ -421,7 +429,11 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
   const { CLAUDECODE: _, ...cleanEnv } = process.env;
   const baseEnv = { ...cleanEnv } as Record<string, string>;
 
-  let exec = await runClaudeOnce(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs);
+  // Per-session working directory: thread/channel sessions run in their own directory
+  const sessionCwd = getSessionCwd(threadId);
+  if (threadId) await mkdir(sessionCwd, { recursive: true });
+
+  let exec = await runClaudeOnce(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs, sessionCwd);
   const primaryRateLimit = extractRateLimitMessage(exec.rawStdout, exec.stderr);
   let usedFallback = false;
 
@@ -429,7 +441,7 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
     console.warn(
       `[${new Date().toLocaleTimeString()}] Claude limit reached; retrying with fallback${fallbackConfig.model ? ` (${fallbackConfig.model})` : ""}...`
     );
-    exec = await runClaudeOnce(args, fallbackConfig.model, fallbackConfig.api, baseEnv, timeoutMs);
+    exec = await runClaudeOnce(args, fallbackConfig.model, fallbackConfig.api, baseEnv, timeoutMs, sessionCwd);
     usedFallback = true;
   }
 
