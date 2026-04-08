@@ -95,19 +95,19 @@ Start the heartbeat daemon for this project. Follow these steps exactly:
      - Discord bot token (hint: create a bot at https://discord.com/developers/applications → Bot → Token. Enable **Message Content Intent** under Privileged Gateway Intents.)
      - Allowed Discord user IDs (hint: enable Developer Mode in Discord settings → right-click your profile → Copy User ID). These are large numbers — they will be stored as strings.
      - Set `discord.token` and `discord.allowedUserIds` (as array of strings) accordingly.
-     - Listen channel IDs (optional — hint: right-click a channel in Discord with Developer Mode enabled → Copy Channel ID). Channels where the bot uses the global session and responds without requiring an @mention.
+     - Listen channel IDs (optional — hint: right-click a Discord channel with Developer Mode enabled → Copy Channel ID). Discord channels listed here share the global session and the bot responds without requiring an @mention. All other Discord channels and threads get their own dedicated session with isolated memory.
      - Set `discord.listenChannels` (as array of strings) accordingly.
      - Note: Discord bot connects via WebSocket gateway in-process with the daemon. It supports DMs, guild mentions/replies, slash commands (/start, /reset), voice messages, and image attachments. `discord.allowedUserIds` is an allowlist that applies to messages, slash commands, and button interactions.
 
      Then use AskUserQuestion to ask two follow-up questions:
 
-     - "Should the bot respond to all guild channels without requiring an @mention? Non-listenChannel channels will get their own isolated session." (header: "All channels", options: "Yes — respond everywhere (Recommended)", "No — only listenChannels and @mentions")
-       - If "Yes": The bot already responds to all guild messages via the `guild_message` catch-all in `guildTriggerReason()`. No config change needed — just inform the user that listenChannels use the global session, and all other channels get their own isolated session.
+     - "Should the bot respond to all Discord channels without requiring an @mention? Channels not in listenChannels will each get their own dedicated session." (header: "All channels", options: "Yes — respond everywhere (Recommended)", "No — only listenChannels and @mentions")
+       - If "Yes": The bot already responds to all guild messages via the `guild_message` catch-all in `guildTriggerReason()`. No config change needed — just inform the user that Discord channels in `listenChannels` share the global session, and all other Discord channels and threads get their own dedicated session.
        - If "No": Tell the user they can customize `guildTriggerReason()` in `discord.ts` to remove the catch-all. For now, the bot will still respond everywhere.
 
-     - "Should each channel/thread have separate memory? Each gets its own CLAUDE.md and conversation context." (header: "Session isolation", options: "Yes — separate memory per channel (Recommended)", "No — shared memory across all channels")
-       - If "Yes": This is the default behavior — non-listenChannel sessions run in their own working directory (`.claude/claudeclaw/sessions/<channelId>/`) with isolated CLAUDE.md and memory.
-       - If "No": Tell the user they can set all channels as `listenChannels` to share the global session, or modify `getSessionCwd()` in `runner.ts`.
+     - "Should each Discord channel and thread have its own separate memory? Each gets its own CLAUDE.md, conversation history, and working directory." (header: "Session isolation", options: "Yes — separate session per channel/thread (Recommended)", "No — shared session across all channels")
+       - If "Yes": This is the default behavior — Discord channels and threads not in `listenChannels` each run in their own working directory (`.claude/claudeclaw/sessions/<discord-id>/`) with isolated CLAUDE.md and memory.
+       - If "No": Tell the user they can add all Discord channels to `listenChannels` to share the global session, or modify `getSessionCwd()` in `runner.ts`.
 
    - **Security level mapping** — set `security.level` in settings based on their choice:
      - "Locked" → `"locked"`
@@ -215,7 +215,7 @@ Start the heartbeat daemon for this project. Follow these steps exactly:
      - macOS: `open http://<HOST>:<PORT>`
      - If open command fails, print the URL clearly so user can open it manually.
 
-7. **Capture session ID**: Read `.claude/claudeclaw/session.json` and extract the `sessionId` field. This is the shared Claude session used by the daemon for heartbeat, jobs, Telegram, and Discord.
+7. **Capture session ID**: Read `.claude/claudeclaw/session.json` and extract the `sessionId` field. This is the global session used by the daemon for heartbeat, jobs, Telegram, and Discord `listenChannels`. Other Discord channels and threads each get their own dedicated session automatically.
 
 8. **Report**: Print the ASCII art below then show the PID, session, status info, Telegram bot next step, and the Web UI URL.
 
@@ -325,7 +325,7 @@ Defaults: `WEB_HOST=127.0.0.1`, `WEB_PORT=4632` unless changed via settings or `
 - `telegram.allowedUserIds` — array of numeric Telegram user IDs allowed to interact
 - `discord.token` — Discord bot token from the Developer Portal
 - `discord.allowedUserIds` — array of string Discord user IDs (snowflakes) allowed to interact
-- `discord.listenChannels` — array of string channel IDs where the bot responds to all messages without requiring an @mention
+- `discord.listenChannels` — array of Discord channel IDs that share the global session (bot responds without @mention). All other Discord channels and threads get their own dedicated session with isolated memory.
 - `security.level` — one of: `locked`, `strict`, `moderate`, `unrestricted`
 - `security.allowedTools` — extra tools to allow on top of the level (e.g. `["Bash(git:*)"]`)
 - `security.disallowedTools` — tools to block on top of the level
