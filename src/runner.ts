@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
 import {
+  DEFAULT_SESSION_KEY,
   getSession,
   createSession,
   incrementTurn,
@@ -59,7 +60,6 @@ export interface RunResult {
 const RATE_LIMIT_PATTERN = /you.ve hit your limit|out of extra usage/i;
 
 // Per-session queues — each session runs independently in parallel
-// "default" session is used for heartbeat, cron, telegram, web UI, etc.
 const sessionQueues = new Map<string, Promise<unknown>>();
 
 function enqueue<T>(fn: () => Promise<T>, sessionKey: string): Promise<T> {
@@ -319,7 +319,7 @@ export async function runCompact(
  * Returns { success, message }.
  */
 export async function compactCurrentSession(): Promise<{ success: boolean; message: string }> {
-  const existing = await getSession("default");
+  const existing = await getSession(DEFAULT_SESSION_KEY);
   if (!existing) return { success: false, message: "No active session to compact." };
 
   const settings = getSettings();
@@ -537,7 +537,7 @@ async function execClaude(name: string, prompt: string, sessionKey: string): Pro
   return result;
 }
 
-export async function run(name: string, prompt: string, sessionKey: string = "default"): Promise<RunResult> {
+export async function run(name: string, prompt: string, sessionKey: string = DEFAULT_SESSION_KEY): Promise<RunResult> {
   return enqueue(() => execClaude(name, prompt, sessionKey), sessionKey);
 }
 
@@ -549,7 +549,7 @@ async function streamClaude(
 ): Promise<void> {
   await mkdir(LOGS_DIR, { recursive: true });
 
-  const existing = await getSession("default");
+  const existing = await getSession(DEFAULT_SESSION_KEY);
   const { security, model, api } = getSettings();
   const securityArgs = buildSecurityArgs(security);
 
@@ -622,7 +622,7 @@ async function streamClaude(
           // Capture session ID for new sessions
           const sid = event.session_id as string | undefined;
           if (sid && !existing) {
-            await createSession("default", sid);
+            await createSession(DEFAULT_SESSION_KEY, sid);
             console.log(`[${new Date().toLocaleTimeString()}] Session created (stream-json): ${sid}`);
           }
         } else if (event.type === "assistant") {
@@ -669,7 +669,7 @@ export async function streamUserMessage(
   onChunk: (text: string) => void,
   onUnblock: () => void
 ): Promise<void> {
-  return enqueue(() => streamClaude(name, prefixUserMessageWithClock(prompt), onChunk, onUnblock), "default");
+  return enqueue(() => streamClaude(name, prefixUserMessageWithClock(prompt), onChunk, onUnblock), DEFAULT_SESSION_KEY);
 }
 
 function prefixUserMessageWithClock(prompt: string): string {
@@ -692,10 +692,10 @@ export async function runUserMessage(name: string, prompt: string, sessionKey?: 
  * session is created immediately. No-op if a session already exists.
  */
 export async function bootstrap(): Promise<void> {
-  const existing = await getSession("default");
+  const existing = await getSession(DEFAULT_SESSION_KEY);
   if (existing) return;
 
   console.log(`[${new Date().toLocaleTimeString()}] Bootstrapping new session...`);
-  await execClaude("bootstrap", "Wakeup, my friend!", "default");
+  await execClaude("bootstrap", "Wakeup, my friend!", DEFAULT_SESSION_KEY);
   console.log(`[${new Date().toLocaleTimeString()}] Bootstrap complete — session is live.`);
 }

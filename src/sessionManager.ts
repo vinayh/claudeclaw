@@ -3,6 +3,9 @@ import { join } from "path";
 const HEARTBEAT_DIR = join(process.cwd(), ".claude", "claudeclaw");
 const SESSIONS_FILE = join(HEARTBEAT_DIR, "sessions.json");
 
+/** Key for the shared session used by heartbeat, cron, telegram, web UI, etc. */
+export const DEFAULT_SESSION_KEY = "default";
+
 export interface Session {
   sessionId: string;
   key: string;
