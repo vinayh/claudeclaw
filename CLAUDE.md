@@ -21,10 +21,24 @@ Each session runs in its own working directory at `.claude/claudeclaw/sessions/{
 - **thread**: Refers specifically to Discord threads (the Discord API concept) — `knownThreads`, `rejoinThreads`, `THREAD_CREATE`, etc.
 - Avoid using "thread" to mean "session" in code or comments.
 
-## Deployment
+## Plugin & Deployment Setup
 
-The daemon runs as a systemd user service:
+The plugin is installed from GitHub as a marketplace. Three directories are involved:
 
+| Directory | Purpose |
+|---|---|
+| **`~/claudeclaw-repo/`** | This repo. Dev/test copy — edit code, run tests, push to GitHub (`vinayh/claudeclaw`). |
+| **`~/.claude/plugins/marketplaces/claudeclaw/`** | Marketplace clone. Claude's plugin system pulls from `vinayh/claudeclaw`. Updated via `/plugin marketplace update`. |
+| **`~/.claude/plugins/cache/claudeclaw/claudeclaw/1.0.0/`** | Cached copy the daemon actually runs from. Copied from the marketplace clone on install/update. |
+
+**Deploy workflow:**
+1. Edit and test in this repo
+2. `git push origin master`
+3. In Claude Code: `/plugin marketplace update` (pulls latest from GitHub into marketplace clone)
+4. Reinstall: `/plugin install claudeclaw@claudeclaw` (copies marketplace clone into cache)
+5. `systemctl --user restart claudeclaw`
+
+**Daemon management:**
 ```
 systemctl --user start claudeclaw
 systemctl --user stop claudeclaw
@@ -34,17 +48,7 @@ journalctl --user -u claudeclaw -f
 
 Service file: `~/.config/systemd/user/claudeclaw.service`
 Working directory: `~/claudeclaw` (the project being managed)
-Plugin code: `~/.claude/plugins/cache/claudeclaw/claudeclaw/1.0.0/`
 Logs: `~/claudeclaw/.claude/claudeclaw/logs/`
-
-The service runs the plugin cache copy, not the repo directly. After making changes in this repo, copy files to the cache and restart the service.
-
-## Development workflow
-
-1. Edit files in this repo (`~/claudeclaw-repo`)
-2. Copy changed files to `~/.claude/plugins/cache/claudeclaw/claudeclaw/1.0.0/`
-3. `systemctl --user restart claudeclaw`
-4. Check logs: `tail -f ~/claudeclaw/.claude/claudeclaw/logs/daemon.log`
 
 ## Key files
 
