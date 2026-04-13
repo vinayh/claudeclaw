@@ -47,7 +47,9 @@ export function onCompactEvent(listener: CompactEventListener): void {
 
 function emitCompactEvent(event: CompactEvent): void {
   for (const listener of compactListeners) {
-    try { listener(event); } catch {}
+    try { listener(event); } catch (err) {
+      console.error(`[${new Date().toLocaleTimeString()}] Compact event listener error:`, err);
+    }
   }
 }
 
@@ -501,7 +503,7 @@ async function execClaude(name: string, prompt: string, sessionKey: string): Pro
 
     if (compactOk) {
       console.log(`[${new Date().toLocaleTimeString()}] Retrying ${name} after compact...`);
-      const retryExec = await runClaudeOnce(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs);
+      const retryExec = await runClaudeOnce(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs, sessionCwd);
       const retryResult: RunResult = {
         stdout: retryExec.rawStdout,
         stderr: retryExec.stderr,
@@ -568,7 +570,9 @@ async function streamClaude(
     try {
       const claudeMd = await Bun.file(PROJECT_CLAUDE_MD).text();
       if (claudeMd.trim()) appendParts.push(claudeMd.trim());
-    } catch {}
+    } catch (err) {
+      console.error(`[${new Date().toLocaleTimeString()}] Failed to read project CLAUDE.md:`, err);
+    }
   }
 
   if (security.level !== "unrestricted") appendParts.push(DIR_SCOPE_PROMPT);

@@ -1,6 +1,7 @@
 import { join, isAbsolute } from "path";
 import { mkdir } from "fs/promises";
 import { existsSync } from "fs";
+import { z } from "zod";
 import { normalizeTimezoneName, resolveTimezoneOffsetMinutes } from "./timezone";
 
 const HEARTBEAT_DIR = join(process.cwd(), ".claude", "claudeclaw");
@@ -8,66 +9,104 @@ const SETTINGS_FILE = join(HEARTBEAT_DIR, "settings.json");
 const JOBS_DIR = join(HEARTBEAT_DIR, "jobs");
 const LOGS_DIR = join(HEARTBEAT_DIR, "logs");
 
-const DEFAULT_SETTINGS: Settings = {
-  model: "",
-  api: "",
-  fallback: {
-    model: "",
-    api: "",
-  },
-  agentic: {
-    enabled: false,
-    defaultMode: "implementation",
-    modes: [
-      {
-        name: "planning",
-        model: "opus",
-        keywords: [
-          "plan", "design", "architect", "strategy", "approach",
-          "research", "investigate", "analyze", "explore", "understand",
-          "think", "consider", "evaluate", "assess", "review",
-          "system design", "trade-off", "decision", "choose", "compare",
-          "brainstorm", "ideate", "concept", "proposal",
-        ],
-        phrases: [
-          "how to implement", "how should i", "what's the best way to",
-          "should i", "which approach", "help me decide", "help me understand",
-        ],
-      },
-      {
-        name: "implementation",
-        model: "sonnet",
-        keywords: [
-          "implement", "code", "write", "create", "build", "add",
-          "fix", "debug", "refactor", "update", "modify", "change",
-          "deploy", "run", "execute", "install", "configure",
-          "test", "commit", "push", "merge", "release",
-          "generate", "scaffold", "setup", "initialize",
-        ],
-      },
-    ],
-  },
-  timezone: "UTC",
-  timezoneOffsetMinutes: 0,
-  heartbeat: {
-    enabled: false,
-    interval: 15,
-    prompt: "",
-    excludeWindows: [],
-    forwardToTelegram: true,
-  },
-  telegram: { token: "", allowedUserIds: [] },
-  discord: { token: "", allowedUserIds: [], listenChannels: [] },
-  security: { level: "moderate", allowedTools: [], disallowedTools: [] },
-  web: { enabled: false, host: "127.0.0.1", port: 4632 },
-  stt: { baseUrl: "", model: "" },
-};
+// ---------------------------------------------------------------------------
+// Schemas
+// ---------------------------------------------------------------------------
 
-export interface HeartbeatExcludeWindow {
-  days?: number[];
-  start: string;
-  end: string;
-}
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6] as const;
+
+export const ExcludeWindowSchema = z.object({
+  start: z.string().regex(TIME_RE, "Must be HH:MM (00:00–23:59)"),
+  end: z.string().regex(TIME_RE, "Must be HH:MM (00:00–23:59)"),
+  days: z
+    .array(z.number().int().min(0).max(6))
+    .default([...ALL_DAYS])
+    .transform((days) => [...new Set(days)].sort((a, b) => a - b)),
+});
+
+export const AgenticModeSchema = z
+  .object({
+    name: z.string().trim().min(1, "Mode name is required"),
+    model: z.string().trim().min(1, "Mode model is required"),
+    keywords: z
+      .array(z.string())
+      .default([])
+      .transform((arr) => arr.map((k) => k.toLowerCase().trim()).filter(Boolean)),
+    phrases: z
+      .array(z.string())
+      .optional()
+      .transform((arr) => {
+        if (!arr) return undefined;
+        const filtered = arr.map((p) => p.toLowerCase().trim()).filter(Boolean);
+        return filtered.length > 0 ? filtered : undefined;
+      }),
+  });
+
+const SECURITY_LEVELS = ["locked", "strict", "moderate", "unrestricted"] as const;
+
+export const SettingsSchema = z
+  .object({
+    model: z.string().trim().catch(""),
+    api: z.string().trim().catch(""),
+    fallback: z
+      .object({
+        model: z.string().trim().catch(""),
+        api: z.string().trim().catch(""),
+      })
+      .catch({ model: "", api: "" }),
+    agentic: z.unknown().catch(undefined),
+    timezone: z.unknown().catch(undefined),
+    timezoneOffsetMinutes: z.unknown().catch(undefined),
+    heartbeat: z
+      .object({
+        enabled: z.boolean().catch(false),
+        interval: z.number().catch(15),
+        prompt: z.string().catch(""),
+        excludeWindows: z.unknown().catch([]),
+        forwardToTelegram: z.boolean().catch(false),
+      })
+      .catch({ enabled: false, interval: 15, prompt: "", excludeWindows: [], forwardToTelegram: true }),
+    telegram: z
+      .object({
+        token: z.string().catch(""),
+        allowedUserIds: z.array(z.number()).catch([]),
+      })
+      .catch({ token: "", allowedUserIds: [] }),
+    discord: z
+      .object({
+        token: z.string().trim().catch(""),
+        allowedUserIds: z.array(z.unknown()).transform((arr) => arr.map(String)).catch([]),
+        listenChannels: z.array(z.unknown()).transform((arr) => arr.map(String)).catch([]),
+      })
+      .catch({ token: "", allowedUserIds: [], listenChannels: [] }),
+    security: z
+      .object({
+        level: z.enum(SECURITY_LEVELS).catch("moderate"),
+        allowedTools: z.array(z.string()).catch([]),
+        disallowedTools: z.array(z.string()).catch([]),
+      })
+      .catch({ level: "moderate" as const, allowedTools: [], disallowedTools: [] }),
+    web: z
+      .object({
+        enabled: z.boolean().catch(false),
+        host: z.string().catch("127.0.0.1"),
+        port: z.number().finite().catch(4632),
+      })
+      .catch({ enabled: false, host: "127.0.0.1", port: 4632 }),
+    stt: z
+      .object({
+        baseUrl: z.string().trim().catch(""),
+        model: z.string().trim().catch(""),
+      })
+      .catch({ baseUrl: "", model: "" }),
+  });
+
+// ---------------------------------------------------------------------------
+// Types (inferred from schemas, re-exported for external consumers)
+// ---------------------------------------------------------------------------
+
+export type HeartbeatExcludeWindow = z.infer<typeof ExcludeWindowSchema>;
 
 export interface HeartbeatConfig {
   enabled: boolean;
@@ -84,15 +123,11 @@ export interface TelegramConfig {
 
 export interface DiscordConfig {
   token: string;
-  allowedUserIds: string[]; // Discord snowflake IDs exceed Number.MAX_SAFE_INTEGER
-  listenChannels: string[]; // Channel IDs where bot responds to all messages (no mention needed)
+  allowedUserIds: string[];
+  listenChannels: string[];
 }
 
-export type SecurityLevel =
-  | "locked"
-  | "strict"
-  | "moderate"
-  | "unrestricted";
+export type SecurityLevel = (typeof SECURITY_LEVELS)[number];
 
 export interface SecurityConfig {
   level: SecurityLevel;
@@ -100,27 +135,7 @@ export interface SecurityConfig {
   disallowedTools: string[];
 }
 
-export interface Settings {
-  model: string;
-  api: string;
-  fallback: ModelConfig;
-  agentic: AgenticConfig;
-  timezone: string;
-  timezoneOffsetMinutes: number;
-  heartbeat: HeartbeatConfig;
-  telegram: TelegramConfig;
-  discord: DiscordConfig;
-  security: SecurityConfig;
-  web: WebConfig;
-  stt: SttConfig;
-}
-
-export interface AgenticMode {
-  name: string;
-  model: string;
-  keywords: string[];
-  phrases?: string[];
-}
+export type AgenticMode = z.infer<typeof AgenticModeSchema>;
 
 export interface AgenticConfig {
   enabled: boolean;
@@ -140,13 +155,77 @@ export interface WebConfig {
 }
 
 export interface SttConfig {
-  /** Base URL of an OpenAI-compatible STT API, e.g. "http://127.0.0.1:8000".
-   *  When set, claudeclaw routes voice transcription through this API instead
-   *  of the bundled whisper.cpp binary. */
   baseUrl: string;
-  /** Model name passed to the API (default: "Systran/faster-whisper-large-v3") */
   model: string;
 }
+
+export interface Settings {
+  model: string;
+  api: string;
+  fallback: ModelConfig;
+  agentic: AgenticConfig;
+  timezone: string;
+  timezoneOffsetMinutes: number;
+  heartbeat: HeartbeatConfig;
+  telegram: TelegramConfig;
+  discord: DiscordConfig;
+  security: SecurityConfig;
+  web: WebConfig;
+  stt: SttConfig;
+}
+
+// ---------------------------------------------------------------------------
+// Default mode definitions (shared by parseAgenticConfig and DEFAULT_SETTINGS)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PLANNING_MODE: AgenticMode = {
+  name: "planning",
+  model: "opus",
+  keywords: [
+    "plan", "design", "architect", "strategy", "approach",
+    "research", "investigate", "analyze", "explore", "understand",
+    "think", "consider", "evaluate", "assess", "review",
+    "system design", "trade-off", "decision", "choose", "compare",
+    "brainstorm", "ideate", "concept", "proposal",
+  ],
+  phrases: [
+    "how to implement", "how should i", "what's the best way to",
+    "should i", "which approach", "help me decide", "help me understand",
+  ],
+};
+
+const DEFAULT_IMPLEMENTATION_MODE: AgenticMode = {
+  name: "implementation",
+  model: "sonnet",
+  keywords: [
+    "implement", "code", "write", "create", "build", "add",
+    "fix", "debug", "refactor", "update", "modify", "change",
+    "deploy", "run", "execute", "install", "configure",
+    "test", "commit", "push", "merge", "release",
+    "generate", "scaffold", "setup", "initialize",
+  ],
+};
+
+const DEFAULT_MODES: AgenticMode[] = [DEFAULT_PLANNING_MODE, DEFAULT_IMPLEMENTATION_MODE];
+
+const DEFAULT_SETTINGS: Settings = {
+  model: "",
+  api: "",
+  fallback: { model: "", api: "" },
+  agentic: { enabled: false, defaultMode: "implementation", modes: DEFAULT_MODES },
+  timezone: "UTC",
+  timezoneOffsetMinutes: 0,
+  heartbeat: { enabled: false, interval: 15, prompt: "", excludeWindows: [], forwardToTelegram: true },
+  telegram: { token: "", allowedUserIds: [] },
+  discord: { token: "", allowedUserIds: [], listenChannels: [] },
+  security: { level: "moderate", allowedTools: [], disallowedTools: [] },
+  web: { enabled: false, host: "127.0.0.1", port: 4632 },
+  stt: { baseUrl: "", model: "" },
+};
+
+// ---------------------------------------------------------------------------
+// Parsing
+// ---------------------------------------------------------------------------
 
 let cached: Settings | null = null;
 
@@ -160,182 +239,99 @@ export async function initConfig(): Promise<void> {
   }
 }
 
-const VALID_LEVELS = new Set<SecurityLevel>([
-  "locked",
-  "strict",
-  "moderate",
-  "unrestricted",
-]);
-
-function parseAgenticMode(raw: any): AgenticMode | null {
-  if (!raw || typeof raw !== "object") return null;
-  const name = typeof raw.name === "string" ? raw.name.trim() : "";
-  const model = typeof raw.model === "string" ? raw.model.trim() : "";
-  if (!name || !model) return null;
-  const keywords = Array.isArray(raw.keywords)
-    ? raw.keywords.filter((k: unknown) => typeof k === "string").map((k: string) => k.toLowerCase().trim())
-    : [];
-  const phrases = Array.isArray(raw.phrases)
-    ? raw.phrases.filter((p: unknown) => typeof p === "string").map((p: string) => p.toLowerCase().trim())
-    : undefined;
-  return { name, model, keywords, ...(phrases && phrases.length > 0 ? { phrases } : {}) };
+/** Parse an array of exclude windows, silently skipping invalid entries. */
+export function parseExcludeWindows(value: unknown): HeartbeatExcludeWindow[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const result = ExcludeWindowSchema.safeParse(entry);
+    return result.success ? [result.data] : [];
+  });
 }
 
-function parseAgenticConfig(raw: any): AgenticConfig {
-  const defaults = DEFAULT_SETTINGS.agentic;
-  if (!raw || typeof raw !== "object") return defaults;
+/** Parse agentic config, handling backward-compat planningModel/implementationModel format. */
+export function parseAgenticConfig(raw: unknown): AgenticConfig {
+  if (!raw || typeof raw !== "object") return DEFAULT_SETTINGS.agentic;
 
-  const enabled = raw.enabled ?? false;
+  const obj = raw as Record<string, unknown>;
+  const enabled = typeof obj.enabled === "boolean" ? obj.enabled : false;
 
   // Backward compat: old planningModel/implementationModel format
-  if (!Array.isArray(raw.modes) && ("planningModel" in raw || "implementationModel" in raw)) {
-    const planningModel = typeof raw.planningModel === "string" ? raw.planningModel.trim() : "opus";
-    const implModel = typeof raw.implementationModel === "string" ? raw.implementationModel.trim() : "sonnet";
+  if (!Array.isArray(obj.modes) && ("planningModel" in obj || "implementationModel" in obj)) {
+    const planningModel = typeof obj.planningModel === "string" ? obj.planningModel.trim() : "opus";
+    const implModel = typeof obj.implementationModel === "string" ? obj.implementationModel.trim() : "sonnet";
     return {
       enabled,
       defaultMode: "implementation",
       modes: [
-        { ...defaults.modes[0], model: planningModel },
-        { ...defaults.modes[1], model: implModel },
+        { ...DEFAULT_PLANNING_MODE, model: planningModel },
+        { ...DEFAULT_IMPLEMENTATION_MODE, model: implModel },
       ],
     };
   }
 
-  // New modes format
+  // Parse modes array, silently skipping invalid entries
   const modes: AgenticMode[] = [];
-  if (Array.isArray(raw.modes)) {
-    for (const m of raw.modes) {
-      const parsed = parseAgenticMode(m);
-      if (parsed) modes.push(parsed);
+  if (Array.isArray(obj.modes)) {
+    for (const m of obj.modes) {
+      const result = AgenticModeSchema.safeParse(m);
+      if (result.success) modes.push(result.data);
     }
   }
 
   return {
     enabled,
-    defaultMode: typeof raw.defaultMode === "string" ? raw.defaultMode.trim() : "implementation",
-    modes: modes.length > 0 ? modes : defaults.modes,
+    defaultMode: typeof obj.defaultMode === "string" ? obj.defaultMode.trim() : "implementation",
+    modes: modes.length > 0 ? modes : DEFAULT_MODES,
   };
 }
 
-function parseSettings(raw: Record<string, any>): Settings {
-  const rawLevel = raw.security?.level;
-  const level: SecurityLevel =
-    typeof rawLevel === "string" && VALID_LEVELS.has(rawLevel as SecurityLevel)
-      ? (rawLevel as SecurityLevel)
-      : "moderate";
+interface DiscordSnowflakes {
+  allowedUserIds: string[];
+  listenChannels: string[];
+}
 
-  const parsedTimezone = parseTimezone(raw.timezone);
+function parseSettings(raw: unknown, discordIds?: DiscordSnowflakes): Settings {
+  const validated = SettingsSchema.parse(raw);
+
+  const parsedTimezone = normalizeTimezoneName(validated.timezone);
 
   return {
-    model: typeof raw.model === "string" ? raw.model.trim() : "",
-    api: typeof raw.api === "string" ? raw.api.trim() : "",
-    fallback: {
-      model: typeof raw.fallback?.model === "string" ? raw.fallback.model.trim() : "",
-      api: typeof raw.fallback?.api === "string" ? raw.fallback.api.trim() : "",
-    },
-    agentic: parseAgenticConfig(raw.agentic),
+    model: validated.model,
+    api: validated.api,
+    fallback: validated.fallback,
+    agentic: parseAgenticConfig(validated.agentic),
     timezone: parsedTimezone,
-    timezoneOffsetMinutes: parseTimezoneOffsetMinutes(raw.timezoneOffsetMinutes, parsedTimezone),
+    timezoneOffsetMinutes: resolveTimezoneOffsetMinutes(validated.timezoneOffsetMinutes, parsedTimezone),
     heartbeat: {
-      enabled: raw.heartbeat?.enabled ?? false,
-      interval: raw.heartbeat?.interval ?? 15,
-      prompt: raw.heartbeat?.prompt ?? "",
-      excludeWindows: parseExcludeWindows(raw.heartbeat?.excludeWindows),
-      forwardToTelegram: raw.heartbeat?.forwardToTelegram ?? false,
+      enabled: validated.heartbeat.enabled,
+      interval: validated.heartbeat.interval,
+      prompt: validated.heartbeat.prompt,
+      excludeWindows: parseExcludeWindows(validated.heartbeat.excludeWindows),
+      forwardToTelegram: validated.heartbeat.forwardToTelegram,
     },
     telegram: {
-      token: process.env.TELEGRAM_TOKEN || raw.telegram?.token || "",
-      allowedUserIds: raw.telegram?.allowedUserIds ?? [],
+      token: process.env.TELEGRAM_TOKEN || validated.telegram.token,
+      allowedUserIds: validated.telegram.allowedUserIds,
     },
     discord: {
-      token: process.env.DISCORD_TOKEN || (typeof raw.discord?.token === "string" ? raw.discord.token.trim() : ""),
-      allowedUserIds: Array.isArray(raw.discord?.allowedUserIds)
-          ? raw.discord.allowedUserIds.map(String)
-          : [],
-      listenChannels: Array.isArray(raw.discord?.listenChannels)
-        ? raw.discord.listenChannels.map(String)
-        : [],
+      token: process.env.DISCORD_TOKEN || validated.discord.token,
+      allowedUserIds: discordIds?.allowedUserIds ?? validated.discord.allowedUserIds,
+      listenChannels: discordIds?.listenChannels ?? validated.discord.listenChannels,
     },
-    security: {
-      level,
-      allowedTools: Array.isArray(raw.security?.allowedTools)
-        ? raw.security.allowedTools
-        : [],
-      disallowedTools: Array.isArray(raw.security?.disallowedTools)
-        ? raw.security.disallowedTools
-        : [],
-    },
-    web: {
-      enabled: raw.web?.enabled ?? false,
-      host: raw.web?.host ?? "127.0.0.1",
-      port: Number.isFinite(raw.web?.port) ? Number(raw.web.port) : 4632,
-    },
-    stt: {
-      baseUrl: typeof raw.stt?.baseUrl === "string" ? raw.stt.baseUrl.trim() : "",
-      model: typeof raw.stt?.model === "string" ? raw.stt.model.trim() : "",
-    },
+    security: validated.security,
+    web: validated.web,
+    stt: validated.stt,
   };
-}
-
-const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
-const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
-
-function parseTimezone(value: unknown): string {
-  return normalizeTimezoneName(value);
-}
-
-function parseExcludeWindows(value: unknown): HeartbeatExcludeWindow[] {
-  if (!Array.isArray(value)) return [];
-  const out: HeartbeatExcludeWindow[] = [];
-  for (const entry of value) {
-    if (!entry || typeof entry !== "object") continue;
-    const start = typeof (entry as any).start === "string" ? (entry as any).start.trim() : "";
-    const end = typeof (entry as any).end === "string" ? (entry as any).end.trim() : "";
-    if (!TIME_RE.test(start) || !TIME_RE.test(end)) continue;
-
-    const rawDays = Array.isArray((entry as any).days) ? (entry as any).days : [];
-    const parsedDays = rawDays
-      .map((d: unknown) => Number(d))
-      .filter((d: number) => Number.isInteger(d) && d >= 0 && d <= 6);
-    const uniqueDays = Array.from(new Set<number>(parsedDays)).sort((a: number, b: number) => a - b);
-
-    out.push({
-      start,
-      end,
-      days: uniqueDays.length > 0 ? uniqueDays : [...ALL_DAYS],
-    });
-  }
-  return out;
-}
-
-function parseTimezoneOffsetMinutes(value: unknown, timezoneFallback?: string): number {
-  return resolveTimezoneOffsetMinutes(value, timezoneFallback);
-}
-
-/**
- * Extract discord.allowedUserIds as raw strings from the JSON text.
- * JSON.parse destroys precision on large numeric snowflakes (>2^53),
- * so we regex them out of the raw text first.
- */
-function extractDiscordUserIds(rawText: string): string[] {
-  // Match the "discord" object's "allowedUserIds" array values
-  const discordBlock = rawText.match(/"discord"\s*:\s*\{[\s\S]*?\}/);
-  if (!discordBlock) return [];
-  const arrayMatch = discordBlock[0].match(/"allowedUserIds"\s*:\s*\[([\s\S]*?)\]/);
-  if (!arrayMatch) return [];
-  const items: string[] = [];
-  // Match both quoted strings and bare numbers
-  for (const m of arrayMatch[1].matchAll(/("(\d+)"|(\d+))/g)) {
-    items.push(m[2] ?? m[3]);
-  }
-  return items;
 }
 
 export async function loadSettings(): Promise<Settings> {
   if (cached) return cached;
   const rawText = await Bun.file(SETTINGS_FILE).text();
   const raw = JSON.parse(rawText);
-  cached = parseSettings(raw, extractDiscordUserIds(rawText));
+  cached = parseSettings(raw, {
+    allowedUserIds: extractSnowflakeArray(rawText, "allowedUserIds"),
+    listenChannels: extractSnowflakeArray(rawText, "listenChannels"),
+  });
   return cached;
 }
 
@@ -343,7 +339,10 @@ export async function loadSettings(): Promise<Settings> {
 export async function reloadSettings(): Promise<Settings> {
   const rawText = await Bun.file(SETTINGS_FILE).text();
   const raw = JSON.parse(rawText);
-  cached = parseSettings(raw, extractDiscordUserIds(rawText));
+  cached = parseSettings(raw, {
+    allowedUserIds: extractSnowflakeArray(rawText, "allowedUserIds"),
+    listenChannels: extractSnowflakeArray(rawText, "listenChannels"),
+  });
   return cached;
 }
 
@@ -352,13 +351,44 @@ export function getSettings(): Settings {
   return cached;
 }
 
+// ---------------------------------------------------------------------------
+// Snowflake extraction (precision-safe parsing of Discord IDs from raw JSON)
+// ---------------------------------------------------------------------------
+
+/** @internal Extract a top-level JSON object block by key, handling nested braces. Exported for testing. */
+export function extractJsonBlock(rawText: string, key: string): string | null {
+  const re = new RegExp(`"${key}"\\s*:\\s*\\{`);
+  const match = re.exec(rawText);
+  if (!match) return null;
+  const start = match.index! + match[0].length - 1;
+  let depth = 0;
+  for (let i = start; i < rawText.length; i++) {
+    if (rawText[i] === "{") depth++;
+    else if (rawText[i] === "}") depth--;
+    if (depth === 0) return rawText.slice(start, i + 1);
+  }
+  return null;
+}
+
+/** @internal Exported for testing. */
+export function extractSnowflakeArray(rawText: string, field: string): string[] {
+  const discordBlock = extractJsonBlock(rawText, "discord");
+  if (!discordBlock) return [];
+  const arrayMatch = discordBlock.match(new RegExp(`"${field}"\\s*:\\s*\\[([\\s\\S]*?)\\]`));
+  if (!arrayMatch) return [];
+  const items: string[] = [];
+  for (const m of arrayMatch[1].matchAll(/("(\d+)"|(\d+))/g)) {
+    items.push(m[2] ?? m[3]);
+  }
+  return items;
+}
+
+// ---------------------------------------------------------------------------
+// Prompt resolution
+// ---------------------------------------------------------------------------
+
 const PROMPT_EXTENSIONS = [".md", ".txt", ".prompt"];
 
-/**
- * If the prompt string looks like a file path (ends with .md, .txt, or .prompt),
- * read and return the file contents. Otherwise return the string as-is.
- * Relative paths are resolved from the project root (cwd).
- */
 export async function resolvePrompt(prompt: string): Promise<string> {
   const trimmed = prompt.trim();
   if (!trimmed) return trimmed;

@@ -11,11 +11,13 @@ export interface Job {
   notify: true | false | "error";
 }
 
-function parseFrontmatterValue(raw: string): string {
+/** @internal Exported for testing. */
+export function parseFrontmatterValue(raw: string): string {
   return raw.trim().replace(/^["']|["']$/g, "");
 }
 
-function parseJobFile(name: string, content: string): Job | null {
+/** @internal Exported for testing. */
+export function parseJobFile(name: string, content: string): Job | null {
   const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
   if (!match) {
     console.error(`Invalid job file format: ${name}`);

@@ -13,7 +13,7 @@ export async function send(args: string[]) {
   }
 
   await initConfig();
-  await loadSettings();
+  const settings = await loadSettings();
 
   const session = await getSession(DEFAULT_SESSION_KEY);
   if (!session) {
@@ -25,7 +25,6 @@ export async function send(args: string[]) {
   console.log(result.stdout);
 
   if (telegramFlag) {
-    const settings = await loadSettings();
     const token = settings.telegram.token;
     const userIds = settings.telegram.allowedUserIds;
 
@@ -55,7 +54,6 @@ export async function send(args: string[]) {
   }
 
   if (discordFlag) {
-    const settings = await loadSettings();
     const dToken = settings.discord.token;
     const dUserIds = settings.discord.allowedUserIds;
 
