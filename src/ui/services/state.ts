@@ -1,5 +1,5 @@
 import { readFile } from "fs/promises";
-import { peekSession } from "../../sessions";
+import { peekDefaultSession } from "../../sessionManager";
 import { SESSION_FILE, SETTINGS_FILE, STATE_FILE } from "../constants";
 import type { WebSnapshot } from "../types";
 
@@ -23,7 +23,7 @@ export function sanitizeSettings(snapshot: WebSnapshot["settings"]) {
 
 export async function buildState(snapshot: WebSnapshot) {
   const now = Date.now();
-  const session = await peekSession();
+  const session = await peekDefaultSession();
   return {
     daemon: {
       running: true,

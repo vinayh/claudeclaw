@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { classifyTask, selectModel } from "./model-router";
 import type { AgenticMode } from "./config";
 

@@ -1,5 +1,4 @@
 import { writeFile, unlink, mkdir } from "fs/promises";
-import { join } from "path";
 import { fileURLToPath } from "url";
 import { run, runUserMessage, streamUserMessage, bootstrap, ensureProjectClaudeMd, loadHeartbeatPromptTemplate } from "../runner";
 import { writeState, type StateData } from "../statusline";
@@ -9,12 +8,9 @@ import { writePidFile, cleanupPidFile, checkExistingDaemon } from "../pid";
 import { initConfig, loadSettings, reloadSettings, resolvePrompt, type HeartbeatConfig, type Settings } from "../config";
 import { getDayAndMinuteAtOffset } from "../timezone";
 import { startWebUi, type WebServerHandle } from "../web";
+import { HEARTBEAT_DIR, STATUSLINE_FILE, CLAUDE_SETTINGS_FILE } from "../paths";
 import type { Job } from "../jobs";
 
-const CLAUDE_DIR = join(process.cwd(), ".claude");
-const HEARTBEAT_DIR = join(CLAUDE_DIR, "claudeclaw");
-const STATUSLINE_FILE = join(CLAUDE_DIR, "statusline.cjs");
-const CLAUDE_SETTINGS_FILE = join(CLAUDE_DIR, "settings.json");
 const PREFLIGHT_SCRIPT = fileURLToPath(new URL("../preflight.ts", import.meta.url));
 
 // --- Statusline setup/teardown ---
@@ -510,27 +506,45 @@ export async function start(args: string[] = []) {
     }
   }
 
-  function forwardToTelegram(label: string, result: { exitCode: number; stdout: string; stderr: string }) {
-    if (!telegramSend || currentSettings.telegram.allowedUserIds.length === 0) return;
-    const text = result.exitCode === 0
-      ? `${label ? `[${label}]\n` : ""}${result.stdout || "(empty)"}`
-      : `${label ? `[${label}] ` : ""}error (exit ${result.exitCode}): ${result.stderr || "Unknown"}`;
-    for (const userId of currentSettings.telegram.allowedUserIds) {
-      telegramSend(userId, text).catch((err) =>
-        console.error(`[Telegram] Failed to forward to ${userId}: ${err}`)
-      );
-    }
+  // --- Chat service forwarding ---
+
+  interface ChatService {
+    name: string;
+    getSendFn: () => ((userId: string, text: string) => Promise<void>) | null;
+    getUserIds: () => (string | number)[];
   }
 
-  function forwardToDiscord(label: string, result: { exitCode: number; stdout: string; stderr: string }) {
-    if (!discordSendToUser || currentSettings.discord.allowedUserIds.length === 0) return;
-    const text = result.exitCode === 0
+  const chatServices: ChatService[] = [
+    {
+      name: "Telegram",
+      getSendFn: () => telegramSend ? (userId, text) => telegramSend!(Number(userId), text) : null,
+      getUserIds: () => currentSettings.telegram.allowedUserIds,
+    },
+    {
+      name: "Discord",
+      getSendFn: () => discordSendToUser,
+      getUserIds: () => currentSettings.discord.allowedUserIds,
+    },
+  ];
+
+  function formatForwardText(label: string, result: { exitCode: number; stdout: string; stderr: string }): string {
+    return result.exitCode === 0
       ? `${label ? `[${label}]\n` : ""}${result.stdout || "(empty)"}`
       : `${label ? `[${label}] ` : ""}error (exit ${result.exitCode}): ${result.stderr || "Unknown"}`;
-    for (const userId of currentSettings.discord.allowedUserIds) {
-      discordSendToUser(userId, text).catch((err) =>
-        console.error(`[Discord] Failed to forward to ${userId}: ${err}`)
-      );
+  }
+
+  function forwardToAll(label: string, result: { exitCode: number; stdout: string; stderr: string }, only?: string[]) {
+    const text = formatForwardText(label, result);
+    for (const service of chatServices) {
+      if (only && !only.includes(service.name)) continue;
+      const sendFn = service.getSendFn();
+      const userIds = service.getUserIds();
+      if (!sendFn || userIds.length === 0) continue;
+      for (const userId of userIds) {
+        sendFn(String(userId), text).catch((err) =>
+          console.error(`[${service.name}] Failed to forward to ${userId}: ${err}`)
+        );
+      }
     }
   }
 
@@ -581,10 +595,10 @@ export async function start(args: string[] = []) {
           if (!r) return;
           const shouldForward = currentSettings.heartbeat.forwardToTelegram || !r.stdout.trim().startsWith("HEARTBEAT_OK");
           if (shouldForward) {
-            forwardToTelegram("", r);
-            forwardToDiscord("", r);
+            forwardToAll("", r);
           }
-        });
+        })
+        .catch((err) => console.error(`[${ts()}] Heartbeat error:`, err));
       nextHeartbeatAt = nextAllowedHeartbeatAt(
         currentSettings.heartbeat,
         currentSettings.timezoneOffsetMinutes,
@@ -606,8 +620,8 @@ export async function start(args: string[] = []) {
     const triggerPrompt = hasPromptFlag ? payload : "Wake up, my friend!";
     const triggerResult = await run("trigger", triggerPrompt);
     console.log(triggerResult.stdout);
-    if (telegramFlag) forwardToTelegram("", triggerResult);
-    if (discordFlag) forwardToDiscord("", triggerResult);
+    const triggerServices = [telegramFlag && "Telegram", discordFlag && "Discord"].filter(Boolean) as string[];
+    if (triggerServices.length > 0) forwardToAll("", triggerResult, triggerServices);
     if (triggerResult.exitCode !== 0) {
       console.error(`[${ts()}] Startup trigger failed (exit ${triggerResult.exitCode}). Daemon will continue running.`);
     }
@@ -713,8 +727,7 @@ export async function start(args: string[] = []) {
           .then((r) => {
             if (job.notify === false) return;
             if (job.notify === "error" && r.exitCode === 0) return;
-            forwardToTelegram(job.name, r);
-            forwardToDiscord(job.name, r);
+            forwardToAll(job.name, r);
           })
           .finally(async () => {
             if (job.recurring) return;

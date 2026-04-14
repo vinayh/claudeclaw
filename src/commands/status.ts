@@ -1,13 +1,7 @@
 import { join } from "path";
 import { readdir, readFile } from "fs/promises";
 import { homedir } from "os";
-
-const CLAUDE_DIR = join(process.cwd(), ".claude");
-const HEARTBEAT_DIR = join(CLAUDE_DIR, "claudeclaw");
-const PID_FILE = join(HEARTBEAT_DIR, "daemon.pid");
-const STATE_FILE = join(HEARTBEAT_DIR, "state.json");
-const SETTINGS_FILE = join(HEARTBEAT_DIR, "settings.json");
-const JOBS_DIR = join(HEARTBEAT_DIR, "jobs");
+import { PID_FILE, STATE_FILE, SETTINGS_FILE, JOBS_DIR } from "../paths";
 
 function formatCountdown(ms: number): string {
   if (ms <= 0) return "now!";

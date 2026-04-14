@@ -1,13 +1,9 @@
-import { join, isAbsolute } from "path";
+import { isAbsolute, join } from "path";
 import { mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { z } from "zod";
 import { normalizeTimezoneName, resolveTimezoneOffsetMinutes } from "./timezone";
-
-const HEARTBEAT_DIR = join(process.cwd(), ".claude", "claudeclaw");
-const SETTINGS_FILE = join(HEARTBEAT_DIR, "settings.json");
-const JOBS_DIR = join(HEARTBEAT_DIR, "jobs");
-const LOGS_DIR = join(HEARTBEAT_DIR, "logs");
+import { HEARTBEAT_DIR, JOBS_DIR, LOGS_DIR, SETTINGS_FILE } from "./paths";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -100,6 +96,7 @@ export const SettingsSchema = z
         model: z.string().trim().catch(""),
       })
       .catch({ baseUrl: "", model: "" }),
+    sessionTimeoutMs: z.number().int().positive().catch(300_000),
   });
 
 // ---------------------------------------------------------------------------
@@ -172,6 +169,7 @@ export interface Settings {
   security: SecurityConfig;
   web: WebConfig;
   stt: SttConfig;
+  sessionTimeoutMs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +219,7 @@ const DEFAULT_SETTINGS: Settings = {
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
+  sessionTimeoutMs: 300_000,
 };
 
 // ---------------------------------------------------------------------------
@@ -321,6 +320,7 @@ function parseSettings(raw: unknown, discordIds?: DiscordSnowflakes): Settings {
     security: validated.security,
     web: validated.web,
     stt: validated.stt,
+    sessionTimeoutMs: validated.sessionTimeoutMs,
   };
 }
 

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
+import { LOGS_DIR, SESSIONS_DIR } from "./paths";
 import {
   DEFAULT_SESSION_KEY,
   getSession,
@@ -12,7 +13,6 @@ import { getSettings, type ModelConfig, type SecurityConfig } from "./config";
 import { buildClockPromptPrefix } from "./timezone";
 import { selectModel } from "./model-router";
 
-const LOGS_DIR = join(process.cwd(), ".claude/claudeclaw/logs");
 // Resolve prompts relative to the claudeclaw installation, not the project dir
 const PROMPTS_DIR = join(import.meta.dir, "..", "prompts");
 const HEARTBEAT_PROMPT_FILE = join(PROMPTS_DIR, "heartbeat", "HEARTBEAT.md");
@@ -168,10 +168,8 @@ async function runClaudeOnce(
 }
 
 const PROJECT_DIR = process.cwd();
-const SESSIONS_BASE = join(process.cwd(), ".claude", "claudeclaw", "sessions");
-
 function getSessionCwd(sessionKey: string): string {
-  return join(SESSIONS_BASE, sessionKey);
+  return join(SESSIONS_DIR, sessionKey);
 }
 
 const DIR_SCOPE_PROMPT = [
@@ -328,7 +326,7 @@ export async function compactCurrentSession(): Promise<{ success: boolean; messa
   const securityArgs = buildSecurityArgs(settings.security);
   const { CLAUDECODE: _, ...cleanEnv } = process.env;
   const baseEnv = { ...cleanEnv } as Record<string, string>;
-  const timeoutMs = (settings as any).sessionTimeoutMs || CLAUDE_TIMEOUT_MS;
+  const timeoutMs = settings.sessionTimeoutMs;
 
   const ok = await runCompact(
     existing.sessionId,
@@ -377,7 +375,7 @@ async function execClaude(name: string, prompt: string, sessionKey: string): Pro
     api: fallback?.api ?? "",
   };
   const securityArgs = buildSecurityArgs(security);
-  const timeoutMs = (settings as any).sessionTimeoutMs || CLAUDE_TIMEOUT_MS;
+  const timeoutMs = settings.sessionTimeoutMs;
 
   console.log(
     `[${new Date().toLocaleTimeString()}] Running: ${name} (${isNew ? "new session" : `resume ${existing.sessionId.slice(0, 8)}`}, security: ${security.level})`

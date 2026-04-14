@@ -1,7 +1,6 @@
 import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession } from "../runner";
 import { getSettings, loadSettings } from "../config";
-import { resetSession, peekSession } from "../sessions";
-import { listSessions, removeSession, peekSessionEntry } from "../sessionManager";
+import { listSessions, removeSession, peekSessionEntry, resetDefaultSession, peekDefaultSession } from "../sessionManager";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -683,7 +682,7 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
     }
 
     if (interaction.data.name === "reset") {
-      await resetSession();
+      await resetDefaultSession();
       await respondToInteraction(interaction, {
         content: "Global session reset. Next message starts fresh.",
       });
@@ -705,7 +704,7 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
     }
 
     if (interaction.data.name === "status") {
-      const session = await peekSession();
+      const session = await peekDefaultSession();
       const settings = getSettings();
       if (!session) {
         await respondToInteraction(interaction, { content: "📊 No active session." });
@@ -715,12 +714,12 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
       const lines = [
         "📊 **Session Status**",
         `Session: \`${session.sessionId.slice(0, 8)}\``,
-        `Turns: ${(session as any).turnCount ?? 0}`,
+        `Turns: ${session.turnCount ?? 0}`,
         `Model: ${settings.model || "default"}`,
         `Security: ${settings.security.level}`,
         `Created: ${session.createdAt}`,
         `Last used: ${session.lastUsedAt}`,
-        `Compact warned: ${(session as any).compactWarned ? "yes" : "no"}`,
+        `Compact warned: ${session.compactWarned ? "yes" : "no"}`,
       ];
       if (sessions.length > 0) {
         lines.push("", `**Sessions:** ${sessions.length}`);
@@ -736,7 +735,7 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
     }
 
     if (interaction.data.name === "context") {
-      const session = await peekSession();
+      const session = await peekDefaultSession();
       if (!session) {
         await respondToInteraction(interaction, { content: "No active session." });
         return;
@@ -782,7 +781,7 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
           `├ Cache read: \`${cacheRead.toLocaleString()}\``,
           `└ Output (cumulative): \`${totalOutput.toLocaleString()}\``,
           ``,
-          `Turns: ${(session as any).turnCount ?? 0}`,
+          `Turns: ${session.turnCount ?? 0}`,
         ];
         await respondToInteraction(interaction, { content: msg.join("\n") });
       } catch (err) {

@@ -16,9 +16,10 @@ jobs:
 
       - run: bun install
 
-      - run: bun run test:coverage
+      - run: bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/lcov.info

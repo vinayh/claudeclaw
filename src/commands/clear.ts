@@ -1,9 +1,9 @@
-import { backupSession } from "../sessions";
+import { backupDefaultSession } from "../sessionManager";
 import { checkExistingDaemon } from "../pid";
 import { stop } from "./stop";
 
 export async function clear() {
-  const backup = await backupSession();
+  const backup = await backupDefaultSession();
 
   if (backup) {
     console.log(`Session backed up → ${backup}`);

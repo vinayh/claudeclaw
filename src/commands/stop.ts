@@ -2,11 +2,7 @@ import { writeFile, unlink, readdir, readFile } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
 import { getPidPath, cleanupPidFile } from "../pid";
-
-const CLAUDE_DIR = join(process.cwd(), ".claude");
-const HEARTBEAT_DIR = join(CLAUDE_DIR, "claudeclaw");
-const STATUSLINE_FILE = join(CLAUDE_DIR, "statusline.cjs");
-const CLAUDE_SETTINGS_FILE = join(CLAUDE_DIR, "settings.json");
+import { HEARTBEAT_DIR, STATUSLINE_FILE, CLAUDE_SETTINGS_FILE } from "../paths";
 
 async function teardownStatusline() {
   try {

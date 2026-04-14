@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import {
   extractJsonBlock,
   extractSnowflakeArray,
@@ -334,5 +334,22 @@ describe("SettingsSchema", () => {
     expect(SettingsSchema.parse({ web: { port: 8080 } }).web.port).toBe(8080);
     expect(SettingsSchema.parse({ web: { port: Infinity } }).web.port).toBe(4632);
     expect(SettingsSchema.parse({ web: { port: "abc" } }).web.port).toBe(4632);
+  });
+
+  it("parses sessionTimeoutMs with default", () => {
+    const result = SettingsSchema.parse({});
+    expect(result.sessionTimeoutMs).toBe(300_000);
+  });
+
+  it("accepts a valid sessionTimeoutMs", () => {
+    const result = SettingsSchema.parse({ sessionTimeoutMs: 600_000 });
+    expect(result.sessionTimeoutMs).toBe(600_000);
+  });
+
+  it("falls back on invalid sessionTimeoutMs", () => {
+    expect(SettingsSchema.parse({ sessionTimeoutMs: "bad" }).sessionTimeoutMs).toBe(300_000);
+    expect(SettingsSchema.parse({ sessionTimeoutMs: -1 }).sessionTimeoutMs).toBe(300_000);
+    expect(SettingsSchema.parse({ sessionTimeoutMs: 0 }).sessionTimeoutMs).toBe(300_000);
+    expect(SettingsSchema.parse({ sessionTimeoutMs: 1.5 }).sessionTimeoutMs).toBe(300_000);
   });
 });

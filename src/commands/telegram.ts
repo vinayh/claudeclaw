@@ -1,6 +1,6 @@
 import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession } from "../runner";
 import { getSettings, loadSettings } from "../config";
-import { resetSession, peekSession } from "../sessions";
+import { resetDefaultSession, peekDefaultSession } from "../sessionManager";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -619,7 +619,7 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
   }
 
   if (command === "/reset") {
-    await resetSession();
+    await resetDefaultSession();
     await sendMessage(config.token, chatId, "Global session reset. Next message starts fresh.", threadId);
     return;
   }
@@ -632,7 +632,7 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
   }
 
   if (command === "/status") {
-    const session = await peekSession();
+    const session = await peekDefaultSession();
     const settings = getSettings();
     if (!session) {
       await sendMessage(config.token, chatId, "📊 No active session.", threadId);
@@ -646,14 +646,14 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
       `Security: ${settings.security.level}`,
       `Created: ${session.createdAt}`,
       `Last used: ${session.lastUsedAt}`,
-      `Compact warned: ${(session as any).compactWarned ? "yes" : "no"}`,
+      `Compact warned: ${session.compactWarned ? "yes" : "no"}`,
     ];
     await sendMessage(config.token, chatId, lines.join("\n"), threadId);
     return;
   }
 
   if (command === "/context") {
-    const session = await peekSession();
+    const session = await peekDefaultSession();
     if (!session) {
       await sendMessage(config.token, chatId, "No active session.", threadId);
       return;

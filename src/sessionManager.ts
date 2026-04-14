@@ -1,7 +1,6 @@
 import { join } from "path";
-
-const HEARTBEAT_DIR = join(process.cwd(), ".claude", "claudeclaw");
-const SESSIONS_FILE = join(HEARTBEAT_DIR, "sessions.json");
+import { unlink, readdir, rename } from "fs/promises";
+import * as paths from "./paths";
 
 /** Key for the shared session used by heartbeat, cron, telegram, web UI, etc. */
 export const DEFAULT_SESSION_KEY = "default";
@@ -24,7 +23,7 @@ let sessionsCache: SessionsData | null = null;
 async function loadSessions(): Promise<SessionsData> {
   if (sessionsCache) return sessionsCache;
   try {
-    const raw = await Bun.file(SESSIONS_FILE).json();
+    const raw = await Bun.file(paths.SESSIONS_FILE).json();
     // Migrate from legacy "threads"/"threadId" format
     if (raw.threads && !raw.sessions) {
       raw.sessions = {};
@@ -45,7 +44,7 @@ async function loadSessions(): Promise<SessionsData> {
 
 async function saveSessions(data: SessionsData): Promise<void> {
   sessionsCache = data;
-  await Bun.write(SESSIONS_FILE, JSON.stringify(data, null, 2) + "\n");
+  await Bun.write(paths.SESSIONS_FILE, JSON.stringify(data, null, 2) + "\n");
 }
 
 /** Get session by key. Returns null if no session exists yet. */
@@ -117,8 +116,61 @@ export async function listSessions(): Promise<Session[]> {
   return Object.values(data.sessions);
 }
 
+/** @internal Reset in-memory cache (for testing only). */
+export function _resetCache(): void {
+  sessionsCache = null;
+}
+
 /** Peek at a session without updating lastUsedAt. */
 export async function peekSessionEntry(key: string): Promise<Session | null> {
   const data = await loadSessions();
   return data.sessions[key] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Default session helpers (replacing legacy sessions.ts)
+// ---------------------------------------------------------------------------
+
+/** Peek at the default session without mutating lastUsedAt. */
+export async function peekDefaultSession(): Promise<Session | null> {
+  return peekSessionEntry(DEFAULT_SESSION_KEY);
+}
+
+/** Remove the default session entry (equivalent to legacy resetSession). */
+export async function resetDefaultSession(): Promise<void> {
+  await removeSession(DEFAULT_SESSION_KEY);
+  // Also clean up the legacy session.json if it exists
+  try { await unlink(paths.SESSION_FILE); } catch { /* already gone */ }
+}
+
+/** Back up the default session to a numbered .backup file and remove the active entry. */
+export async function backupDefaultSession(): Promise<string | null> {
+  const session = await peekSessionEntry(DEFAULT_SESSION_KEY);
+  if (!session) return null;
+
+  // Find next backup index
+  let files: string[];
+  try {
+    files = await readdir(paths.HEARTBEAT_DIR);
+  } catch {
+    files = [];
+  }
+  const indices = files
+    .filter((f) => /^session_\d+\.backup$/.test(f))
+    .map((f) => Number(f.match(/^session_(\d+)\.backup$/)![1]));
+  const nextIndex = indices.length > 0 ? Math.max(...indices) + 1 : 1;
+
+  const backupName = `session_${nextIndex}.backup`;
+  const backupPath = join(paths.HEARTBEAT_DIR, backupName);
+
+  // Write session data as the backup file
+  await Bun.write(backupPath, JSON.stringify(session, null, 2) + "\n");
+
+  // Remove from active sessions
+  await removeSession(DEFAULT_SESSION_KEY);
+
+  // Also clean up legacy session.json if it exists
+  try { await rename(paths.SESSION_FILE, backupPath); } catch { /* already gone or already backed up above */ }
+
+  return backupName;
 }
