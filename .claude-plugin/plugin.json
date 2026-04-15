@@ -1,5 +1,7 @@
 {
   "name": "claudeclaw",
   "version": "1.0.1",
-  "description": "Cron-like daemon that runs Claude prompts on a schedule"
+  "description": "Cron-like daemon that runs Claude prompts on a schedule",
+  "keywords": ["cron", "heartbeat", "scheduler", "daemon"],
+  "category": "productivity"
 }

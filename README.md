@@ -6,25 +6,26 @@
 </p>
 
 <p align="center">
-  <img src="https://awesome.re/badge.svg" alt="Awesome" />
-  <a href="https://github.com/moazbuilds/ClaudeClaw/stargazers">
-    <img src="https://img.shields.io/github/stars/moazbuilds/ClaudeClaw?style=flat-square&color=f59e0b" alt="GitHub Stars" />
-  </a>
-  <a href="https://github.com/moazbuilds/ClaudeClaw">
-    <img src="https://img.shields.io/badge/downloads-~10k-2da44e?style=flat-square" alt="Downloads ~10k" />
-  </a>
-  <a href="https://github.com/moazbuilds/ClaudeClaw/commits/master">
-    <img src="https://img.shields.io/github/last-commit/moazbuilds/ClaudeClaw?style=flat-square&color=0ea5e9" alt="Last Commit" />
-  </a>
-  <a href="https://github.com/moazbuilds/ClaudeClaw/graphs/contributors">
-    <img src="https://img.shields.io/github/contributors/moazbuilds/ClaudeClaw?style=flat-square&color=a855f7" alt="Contributors" />
-  </a>
-  <a href="https://x.com/moazbuilds">
-    <img src="https://img.shields.io/badge/X-%40moazbuilds-000000?style=flat-square&logo=x" alt="X @moazbuilds" />
+  <a href="https://codecov.io/github/vinayh/claudeclaw">
+    <img src="https://codecov.io/github/vinayh/claudeclaw/graph/badge.svg?token=UZWWVC30J8" alt="codecov" />
   </a>
 </p>
 
 <p align="center"><b>A lightweight, open-source OpenClaw version built into your Claude Code.</b></p>
+
+## Fork Changes
+
+This is a fork of [moazbuilds/ClaudeClaw](https://github.com/moazbuilds/ClaudeClaw) with the following changes:
+
+- **Per-channel session isolation (Discord):** Each guild channel gets its own isolated Claude CLI session with independent working directory and memory, so conversations in different channels don't interfere with each other.
+- **Consolidated session management:** Unified session handling around a single `SessionManager` with consistent naming (`session` = Claude conversation, `thread` = Discord thread only). Replaced the legacy global session file with a keyed session map persisted to `sessions.json`.
+- **Environment variable tokens:** Discord and Telegram tokens can now be set via environment variables instead of `settings.json`, keeping secrets out of config files.
+- **Statusline fix:** Fixed box border rendering that broke when content width changed dynamically.
+- **Unit tests and CI:** Added vitest test suite with Zod schema validation, CI workflow with code coverage reporting via Codecov.
+- **Shared paths and constants:** Extracted shared path helpers and `DEFAULT_SESSION_KEY` constant to reduce duplication across modules.
+- **Deployment docs:** Added systemd service template and marketplace-based deploy workflow documentation in `CLAUDE.md`.
+
+---
 
 ClaudeClaw turns your Claude Code into a personal assistant that never sleeps. It runs as a background daemon, executing tasks on a schedule, responding to messages on Telegram and Discord, transcribing voice commands, and integrating with any service you need.
 
@@ -48,7 +49,7 @@ ClaudeClaw turns your Claude Code into a personal assistant that never sleeps. I
 ## Getting Started in 5 Minutes
 
 ```bash
-claude plugin marketplace add moazbuilds/claudeclaw
+claude plugin marketplace add vinayh/claudeclaw
 claude plugin install claudeclaw
 ```
 Then open a Claude Code session and run:
@@ -60,10 +61,10 @@ The setup wizard walks you through model, heartbeat, Telegram, Discord, and secu
 ## What Would Be Built Next?
 
 > **Mega Post:** Help shape the next ClaudeClaw features.
-> Vote, suggest ideas, and discuss priorities in **[this post](https://github.com/moazbuilds/claudeclaw/issues/14)**.
+> Vote, suggest ideas, and discuss priorities in **[this post](https://github.com/vinayh/claudeclaw/issues/14)**.
 
 <p align="center">
-  <a href="https://github.com/moazbuilds/claudeclaw/issues/14">
+  <a href="https://github.com/vinayh/claudeclaw/issues/14">
     <img src="https://img.shields.io/badge/Roadmap-Mega%20Post-blue?style=for-the-badge&logo=github" alt="Roadmap Mega Post" />
   </a>
 </p>
@@ -136,10 +137,10 @@ See [docs/MULTI_SESSION.md](docs/MULTI_SESSION.md) for technical details.
 ### Cool UI to Manage and Check Your ClaudeClaw
 ![Cool UI to manage and check your ClaudeClaw](images/dashboard.png)
 
-## Contributors
+## Contributors (including to the upstream repo)
 
 Thanks for helping make ClaudeClaw better.
 
-<a href="https://github.com/moazbuilds/claudeclaw/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=moazbuilds/claudeclaw" />
+<a href="https://github.com/vinayh/claudeclaw/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=vinayh/claudeclaw" />
 </a>

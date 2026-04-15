@@ -31,7 +31,7 @@ ${pageStyles}
   <div class="grain" aria-hidden="true"></div>
   <a
     class="repo-cta"
-    href="https://github.com/moazbuilds/claudeclaw"
+    href="https://github.com/vinayh/claudeclaw"
     target="_blank"
     rel="noopener noreferrer"
     aria-label="Star claudeclaw on GitHub"
