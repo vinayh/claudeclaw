@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm, writeFile } from "fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir, homedir } from "os";
 import {
@@ -163,6 +163,7 @@ describe("getContextUsage", () => {
     tempDir = await mkdtemp(join(tmpdir(), "claudeclaw-ctx-test-"));
     projectSlug = process.cwd().replace(/\//g, "-");
     projectDir = join(homedir(), ".claude", "projects", projectSlug);
+    await mkdir(projectDir, { recursive: true });
   });
 
   afterAll(async () => {
