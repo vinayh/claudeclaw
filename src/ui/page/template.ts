@@ -1,7 +1,7 @@
 import { pageStyles } from "./styles";
 import { pageScript } from "./script";
 
-function decodeUnicodeEscapes(text: string): string {
+export function decodeUnicodeEscapes(text: string): string {
   const decodedCodePoints = text.replace(/\\u\{([0-9a-fA-F]+)\}/g, (_, hex: string) => {
     const codePoint = Number.parseInt(hex, 16);
     return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : _;

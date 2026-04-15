@@ -44,11 +44,16 @@ async function readRecentRunLogs(tail: number) {
   );
 }
 
+/** @internal Exported for testing. */
+export function tailLines(text: string, count: number): string[] {
+  const all = text.split(/\r?\n/);
+  return all.slice(Math.max(0, all.length - count)).filter(Boolean);
+}
+
 async function readTail(path: string, lines: number): Promise<string[]> {
   try {
     const text = await readFile(path, "utf-8");
-    const all = text.split(/\r?\n/);
-    return all.slice(Math.max(0, all.length - lines)).filter(Boolean);
+    return tailLines(text, lines);
   } catch {
     return [];
   }

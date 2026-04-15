@@ -73,11 +73,10 @@ export async function loadJobs(): Promise<Job[]> {
   return jobs;
 }
 
-export async function clearJobSchedule(jobName: string): Promise<void> {
-  const path = join(JOBS_DIR, `${jobName}.md`);
-  const content = await Bun.file(path).text();
+/** @internal Exported for testing. */
+export function stripScheduleFromContent(content: string): string | null {
   const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
-  if (!match) return;
+  if (!match) return null;
 
   const filteredFrontmatter = match[1]
     .split("\n")
@@ -86,6 +85,12 @@ export async function clearJobSchedule(jobName: string): Promise<void> {
     .trim();
 
   const body = match[2].trim();
-  const next = `---\n${filteredFrontmatter}\n---\n${body}\n`;
-  await Bun.write(path, next);
+  return `---\n${filteredFrontmatter}\n---\n${body}\n`;
+}
+
+export async function clearJobSchedule(jobName: string): Promise<void> {
+  const path = join(JOBS_DIR, `${jobName}.md`);
+  const content = await Bun.file(path).text();
+  const result = stripScheduleFromContent(content);
+  if (result) await Bun.write(path, result);
 }

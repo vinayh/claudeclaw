@@ -4,6 +4,7 @@ import {
   extractSnowflakeArray,
   parseExcludeWindows,
   parseAgenticConfig,
+  parseSettings,
   ExcludeWindowSchema,
   AgenticModeSchema,
   SettingsSchema,
@@ -351,5 +352,100 @@ describe("SettingsSchema", () => {
     expect(SettingsSchema.parse({ sessionTimeoutMs: -1 }).sessionTimeoutMs).toBe(300_000);
     expect(SettingsSchema.parse({ sessionTimeoutMs: 0 }).sessionTimeoutMs).toBe(300_000);
     expect(SettingsSchema.parse({ sessionTimeoutMs: 1.5 }).sessionTimeoutMs).toBe(300_000);
+  });
+});
+
+describe("parseSettings", () => {
+  it("returns full Settings from minimal input", () => {
+    const result = parseSettings({});
+    expect(result.model).toBe("");
+    expect(result.api).toBe("");
+    expect(result.heartbeat.enabled).toBe(false);
+    expect(result.heartbeat.interval).toBe(15);
+    expect(result.telegram.token).toBe("");
+    expect(result.discord.token).toBe("");
+    expect(result.security.level).toBe("moderate");
+    expect(result.sessionTimeoutMs).toBe(300_000);
+  });
+
+  it("passes model and api through", () => {
+    const result = parseSettings({ model: "opus", api: "my-key" });
+    expect(result.model).toBe("opus");
+    expect(result.api).toBe("my-key");
+  });
+
+  it("resolves timezone into timezoneOffsetMinutes", () => {
+    const result = parseSettings({ timezone: "UTC" });
+    expect(result.timezone).toBe("UTC");
+    expect(result.timezoneOffsetMinutes).toBe(0);
+  });
+
+  it("uses explicit timezoneOffsetMinutes when provided", () => {
+    const result = parseSettings({ timezoneOffsetMinutes: -300 });
+    expect(result.timezoneOffsetMinutes).toBe(-300);
+  });
+
+  it("uses discordIds override when provided", () => {
+    const result = parseSettings(
+      { discord: { allowedUserIds: ["111"], listenChannels: ["222"] } },
+      { allowedUserIds: ["999"], listenChannels: ["888"] },
+    );
+    expect(result.discord.allowedUserIds).toEqual(["999"]);
+    expect(result.discord.listenChannels).toEqual(["888"]);
+  });
+
+  it("falls back to validated discord IDs when no discordIds override", () => {
+    const result = parseSettings({
+      discord: { allowedUserIds: ["111"], listenChannels: ["222"] },
+    });
+    expect(result.discord.allowedUserIds).toEqual(["111"]);
+    expect(result.discord.listenChannels).toEqual(["222"]);
+  });
+
+  it("parses heartbeat excludeWindows", () => {
+    const result = parseSettings({
+      heartbeat: {
+        excludeWindows: [{ start: "22:00", end: "06:00", days: [0, 6] }],
+      },
+    });
+    expect(result.heartbeat.excludeWindows).toHaveLength(1);
+    expect(result.heartbeat.excludeWindows[0].start).toBe("22:00");
+  });
+
+  it("parses agentic config", () => {
+    const result = parseSettings({
+      agentic: {
+        enabled: true,
+        defaultMode: "planning",
+        modes: [{ name: "test", model: "haiku", keywords: ["debug"] }],
+      },
+    });
+    expect(result.agentic.enabled).toBe(true);
+    expect(result.agentic.defaultMode).toBe("planning");
+    expect(result.agentic.modes).toHaveLength(1);
+  });
+
+  it("uses TELEGRAM_TOKEN env var over settings value", () => {
+    const orig = process.env.TELEGRAM_TOKEN;
+    try {
+      process.env.TELEGRAM_TOKEN = "env-token";
+      const result = parseSettings({ telegram: { token: "settings-token" } });
+      expect(result.telegram.token).toBe("env-token");
+    } finally {
+      if (orig === undefined) delete process.env.TELEGRAM_TOKEN;
+      else process.env.TELEGRAM_TOKEN = orig;
+    }
+  });
+
+  it("uses DISCORD_TOKEN env var over settings value", () => {
+    const orig = process.env.DISCORD_TOKEN;
+    try {
+      process.env.DISCORD_TOKEN = "env-discord";
+      const result = parseSettings({ discord: { token: "settings-discord" } });
+      expect(result.discord.token).toBe("env-discord");
+    } finally {
+      if (orig === undefined) delete process.env.DISCORD_TOKEN;
+      else process.env.DISCORD_TOKEN = orig;
+    }
   });
 });

@@ -290,7 +290,8 @@ interface DiscordSnowflakes {
   listenChannels: string[];
 }
 
-function parseSettings(raw: unknown, discordIds?: DiscordSnowflakes): Settings {
+/** @internal Exported for testing. */
+export function parseSettings(raw: unknown, discordIds?: DiscordSnowflakes): Settings {
   const validated = SettingsSchema.parse(raw);
 
   const parsedTimezone = normalizeTimezoneName(validated.timezone);

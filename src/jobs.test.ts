@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { parseFrontmatterValue, parseJobFile } from "./jobs";
+import { parseFrontmatterValue, parseJobFile, stripScheduleFromContent } from "./jobs";
 
 describe("parseFrontmatterValue", () => {
   it("strips double quotes", () => {
@@ -105,5 +105,54 @@ schedule: "0 9 * * *"
   some prompt with whitespace
 `;
     expect(parseJobFile("trim", content)!.prompt).toBe("some prompt with whitespace");
+  });
+});
+
+describe("stripScheduleFromContent", () => {
+  it("removes schedule line from frontmatter", () => {
+    const content = `---
+schedule: "0 9 * * *"
+recurring: true
+---
+Do something`;
+    const result = stripScheduleFromContent(content);
+    expect(result).toBe(`---\nrecurring: true\n---\nDo something\n`);
+  });
+
+  it("removes multiple schedule lines", () => {
+    const content = `---
+schedule: "0 9 * * *"
+recurring: true
+schedule: "0 18 * * *"
+---
+prompt`;
+    const result = stripScheduleFromContent(content);
+    expect(result).toBe(`---\nrecurring: true\n---\nprompt\n`);
+  });
+
+  it("returns null for content without frontmatter", () => {
+    expect(stripScheduleFromContent("no frontmatter")).toBeNull();
+    expect(stripScheduleFromContent("---\nno closing")).toBeNull();
+  });
+
+  it("preserves frontmatter when no schedule line exists", () => {
+    const content = `---
+recurring: true
+notify: error
+---
+prompt body`;
+    const result = stripScheduleFromContent(content);
+    expect(result).toBe(`---\nrecurring: true\nnotify: error\n---\nprompt body\n`);
+  });
+
+  it("preserves body content intact", () => {
+    const content = `---
+schedule: "* * * * *"
+---
+Multi-line
+body content
+here`;
+    const result = stripScheduleFromContent(content);
+    expect(result).toContain("Multi-line\nbody content\nhere");
   });
 });
