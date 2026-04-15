@@ -1,13 +1,12 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, mock } from "bun:test";
 import {
   checkAuthorization,
   isBuiltInCommand,
   extractCommand,
-  buildPrompt,
-  appendMediaFailures,
+  downloadAndTranscribe,
   logIncomingMessage,
   type PlatformAdapter,
-  type ChatContext,
+  type AttachmentSources,
 } from "./chat-handler";
 import { ChatPlatform } from "./chat-utils";
 
@@ -20,26 +19,11 @@ function mockAdapter(overrides?: Partial<PlatformAdapter>): PlatformAdapter {
     platform: ChatPlatform.Discord,
     maxMessageLength: 2000,
     typingIntervalMs: 8000,
+    debug: false,
     sendMessage: async () => {},
     sendTyping: async () => {},
     sendReaction: async () => {},
     debugLog: () => {},
-    ...overrides,
-  };
-}
-
-function mockContext(overrides?: Partial<ChatContext>): ChatContext {
-  return {
-    chatId: "chan-1",
-    userId: "user-1",
-    username: "testuser",
-    messageId: "msg-1",
-    isDM: true,
-    rawContent: "hello world",
-    imagePath: null,
-    voicePath: null,
-    voiceTranscript: null,
-    documentInfo: null,
     ...overrides,
   };
 }
@@ -126,111 +110,115 @@ describe("extractCommand", () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildPrompt
+// downloadAndTranscribe
 // ---------------------------------------------------------------------------
 
-describe("buildPrompt", () => {
-  it("builds a basic Discord prompt", () => {
-    const adapter = mockAdapter({ platform: ChatPlatform.Discord });
-    const ctx = mockContext({ rawContent: "hello" });
-    const result = buildPrompt(adapter, ctx, null, null);
-    expect(result).toContain("[Discord from testuser]");
-    expect(result).toContain("Message: hello");
+describe("downloadAndTranscribe", () => {
+  it("returns nulls when no attachments", async () => {
+    const sources: AttachmentSources = {
+      hasImage: false,
+      hasVoice: false,
+      hasDocument: false,
+      downloadImage: async () => null,
+      downloadVoice: async () => null,
+      downloadDocument: async () => null,
+    };
+    const result = await downloadAndTranscribe(sources, mockAdapter());
+    expect(result.imagePath).toBeNull();
+    expect(result.voicePath).toBeNull();
+    expect(result.voiceTranscript).toBeNull();
+    expect(result.documentInfo).toBeNull();
+    expect(result.failures).toEqual({});
   });
 
-  it("builds a basic Telegram prompt", () => {
-    const adapter = mockAdapter({ platform: ChatPlatform.Telegram });
-    const ctx = mockContext({ rawContent: "hello" });
-    const result = buildPrompt(adapter, ctx, null, null);
-    expect(result).toContain("[Telegram from testuser]");
+  it("downloads image successfully", async () => {
+    const sources: AttachmentSources = {
+      hasImage: true,
+      hasVoice: false,
+      hasDocument: false,
+      downloadImage: async () => "/tmp/img.jpg",
+      downloadVoice: async () => null,
+      downloadDocument: async () => null,
+    };
+    const result = await downloadAndTranscribe(sources, mockAdapter());
+    expect(result.imagePath).toBe("/tmp/img.jpg");
+    expect(result.failures.image).toBeUndefined();
   });
 
-  it("includes thread ID when present", () => {
-    const adapter = mockAdapter();
-    const ctx = mockContext({ threadId: "thread-123" });
-    const result = buildPrompt(adapter, ctx, null, null);
-    expect(result).toContain("[thread:thread-123]");
+  it("sets image failure on download error", async () => {
+    const sources: AttachmentSources = {
+      hasImage: true,
+      hasVoice: false,
+      hasDocument: false,
+      downloadImage: async () => { throw new Error("download failed"); },
+      downloadVoice: async () => null,
+      downloadDocument: async () => null,
+    };
+    const result = await downloadAndTranscribe(sources, mockAdapter());
+    expect(result.imagePath).toBeNull();
+    expect(result.failures.image).toBe(true);
   });
 
-  it("omits thread ID when absent", () => {
-    const adapter = mockAdapter();
-    const ctx = mockContext();
-    const result = buildPrompt(adapter, ctx, null, null);
-    expect(result).not.toContain("[thread:");
+  it("sets voice failure when voice download returns null", async () => {
+    const sources: AttachmentSources = {
+      hasImage: false,
+      hasVoice: true,
+      hasDocument: false,
+      downloadImage: async () => null,
+      downloadVoice: async () => null,
+      downloadDocument: async () => null,
+    };
+    const result = await downloadAndTranscribe(sources, mockAdapter());
+    expect(result.voicePath).toBeNull();
+    expect(result.voiceTranscript).toBeNull();
+    expect(result.failures.voice).toBe(true);
   });
 
-  it("includes skill context with command-name tag", () => {
-    const adapter = mockAdapter();
-    const ctx = mockContext({ rawContent: "/deploy prod" });
-    const result = buildPrompt(adapter, ctx, "SKILL CONTENT HERE", "/deploy");
-    expect(result).toContain("<command-name>/deploy</command-name>");
-    expect(result).toContain("SKILL CONTENT HERE");
-    expect(result).toContain("User arguments: prod");
-    expect(result).not.toContain("Message:");
+  it("downloads document successfully", async () => {
+    const docInfo = { localPath: "/tmp/doc.pdf", originalName: "report.pdf" };
+    const sources: AttachmentSources = {
+      hasImage: false,
+      hasVoice: false,
+      hasDocument: true,
+      downloadImage: async () => null,
+      downloadVoice: async () => null,
+      downloadDocument: async () => docInfo,
+    };
+    const result = await downloadAndTranscribe(sources, mockAdapter());
+    expect(result.documentInfo).toEqual(docInfo);
+    expect(result.failures.document).toBeUndefined();
   });
 
-  it("includes skill context without args when none given", () => {
-    const adapter = mockAdapter();
-    const ctx = mockContext({ rawContent: "/deploy" });
-    const result = buildPrompt(adapter, ctx, "SKILL CONTENT", "/deploy");
-    expect(result).not.toContain("User arguments:");
+  it("sets document failure on download error", async () => {
+    const sources: AttachmentSources = {
+      hasImage: false,
+      hasVoice: false,
+      hasDocument: true,
+      downloadImage: async () => null,
+      downloadVoice: async () => null,
+      downloadDocument: async () => { throw new Error("doc download failed"); },
+    };
+    const result = await downloadAndTranscribe(sources, mockAdapter());
+    expect(result.documentInfo).toBeNull();
+    expect(result.failures.document).toBe(true);
   });
 
-  it("includes image path when present", () => {
-    const adapter = mockAdapter();
-    const ctx = mockContext({ imagePath: "/tmp/img.jpg" });
-    const result = buildPrompt(adapter, ctx, null, null);
-    expect(result).toContain("Image path: /tmp/img.jpg");
-    expect(result).toContain("Inspect this image file");
-  });
+  it("skips download callbacks when has* is false", async () => {
+    const downloadImage = mock(async () => "/tmp/img.jpg");
+    const downloadVoice = mock(async () => "/tmp/voice.ogg");
+    const downloadDocument = mock(async () => ({ localPath: "/tmp/doc.pdf", originalName: "doc.pdf" }));
 
-  it("includes voice transcript when present", () => {
-    const adapter = mockAdapter();
-    const ctx = mockContext({ voiceTranscript: "hello from voice" });
-    const result = buildPrompt(adapter, ctx, null, null);
-    expect(result).toContain("Voice transcript: hello from voice");
-  });
-
-  it("includes document info when present", () => {
-    const adapter = mockAdapter();
-    const ctx = mockContext({
-      documentInfo: { localPath: "/tmp/doc.pdf", originalName: "report.pdf" },
-    });
-    const result = buildPrompt(adapter, ctx, null, null);
-    expect(result).toContain("Document path: /tmp/doc.pdf");
-    expect(result).toContain("Original filename: report.pdf");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// appendMediaFailures
-// ---------------------------------------------------------------------------
-
-describe("appendMediaFailures", () => {
-  it("appends image failure message", () => {
-    const result = appendMediaFailures("base prompt", { image: true });
-    expect(result).toContain("image, but downloading it failed");
-  });
-
-  it("appends voice failure message", () => {
-    const result = appendMediaFailures("base prompt", { voice: true });
-    expect(result).toContain("voice audio, but it could not be transcribed");
-  });
-
-  it("appends document failure message", () => {
-    const result = appendMediaFailures("base prompt", { document: true });
-    expect(result).toContain("document, but downloading it failed");
-  });
-
-  it("appends multiple failures", () => {
-    const result = appendMediaFailures("base", { image: true, voice: true, document: true });
-    expect(result).toContain("image");
-    expect(result).toContain("voice");
-    expect(result).toContain("document");
-  });
-
-  it("returns base prompt when no failures", () => {
-    const result = appendMediaFailures("base prompt", {});
-    expect(result).toBe("base prompt");
+    const sources: AttachmentSources = {
+      hasImage: false,
+      hasVoice: false,
+      hasDocument: false,
+      downloadImage,
+      downloadVoice,
+      downloadDocument,
+    };
+    await downloadAndTranscribe(sources, mockAdapter());
+    expect(downloadImage).not.toHaveBeenCalled();
+    expect(downloadVoice).not.toHaveBeenCalled();
+    expect(downloadDocument).not.toHaveBeenCalled();
   });
 });

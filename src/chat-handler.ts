@@ -1,13 +1,18 @@
 /**
  * Shared chat message handler for Discord, Telegram, and future platforms.
- * Extracts common logic: authorization, built-in commands, skill routing,
- * prompt assembly, response processing, and typing indicators.
+ * Owns the full message pipeline: authorization → built-in commands →
+ * attachment download/transcription → skill routing → prompt assembly →
+ * Claude execution → response processing.
+ *
+ * Platform adapters implement PlatformAdapter and pass platform-specific
+ * download callbacks via AttachmentSources. No business logic in adapters.
  */
 
 import { runUserMessage, compactCurrentSession, type RunResult } from "./runner";
 import { getSettings } from "./config";
 import { resetDefaultSession, peekDefaultSession, listSessions } from "./sessionManager";
 import { resolveSkillPrompt } from "./skills";
+import { transcribeAudioToText } from "./whisper";
 import {
   type ChatPlatform,
   extractReactionDirective,
@@ -25,16 +30,12 @@ export interface PlatformAdapter {
   readonly platform: ChatPlatform;
   readonly maxMessageLength: number;
   readonly typingIntervalMs: number;
+  readonly debug: boolean;
 
-  /** Send a text message, splitting into chunks if needed. */
   sendMessage(chatId: string, text: string, threadId?: string): Promise<void>;
-  /** Send a typing indicator. */
   sendTyping(chatId: string, threadId?: string): Promise<void>;
-  /** Add a reaction emoji to a message. */
   sendReaction(chatId: string, messageId: string, emoji: string): Promise<void>;
-  /** Send a file/document (optional — platforms that don't support it omit this). */
   sendFile?(chatId: string, filePath: string, threadId?: string): Promise<void>;
-  /** Platform-specific debug logger. */
   debugLog(message: string): void;
 }
 
@@ -58,6 +59,85 @@ export interface ChatContext {
 }
 
 // ---------------------------------------------------------------------------
+// Attachment downloading + transcription
+// ---------------------------------------------------------------------------
+
+export interface AttachmentSources {
+  hasImage: boolean;
+  hasVoice: boolean;
+  hasDocument: boolean;
+  downloadImage: () => Promise<string | null>;
+  downloadVoice: () => Promise<string | null>;
+  downloadDocument: () => Promise<{ localPath: string; originalName: string } | null>;
+}
+
+export interface AttachmentResult {
+  imagePath: string | null;
+  voicePath: string | null;
+  voiceTranscript: string | null;
+  documentInfo: { localPath: string; originalName: string } | null;
+  failures: { image?: boolean; voice?: boolean; document?: boolean };
+}
+
+/**
+ * Download attachments and transcribe voice using platform-provided callbacks.
+ * Handles all try/catch orchestration so platforms don't duplicate this logic.
+ */
+export async function downloadAndTranscribe(
+  sources: AttachmentSources,
+  adapter: PlatformAdapter,
+): Promise<AttachmentResult> {
+  let imagePath: string | null = null;
+  let voicePath: string | null = null;
+  let voiceTranscript: string | null = null;
+  let documentInfo: { localPath: string; originalName: string } | null = null;
+  const failures: { image?: boolean; voice?: boolean; document?: boolean } = {};
+
+  if (sources.hasImage) {
+    try {
+      imagePath = await sources.downloadImage();
+    } catch (err) {
+      failures.image = true;
+      console.error(`[${adapter.platform}] Failed to download image: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  if (sources.hasVoice) {
+    try {
+      voicePath = await sources.downloadVoice();
+    } catch (err) {
+      console.error(`[${adapter.platform}] Failed to download voice: ${err instanceof Error ? err.message : err}`);
+    }
+
+    if (voicePath) {
+      try {
+        adapter.debugLog(`Voice file saved: path=${voicePath}`);
+        voiceTranscript = await transcribeAudioToText(voicePath, {
+          debug: adapter.debug,
+          log: (msg) => adapter.debugLog(msg),
+        });
+      } catch (err) {
+        failures.voice = true;
+        console.error(`[${adapter.platform}] Failed to transcribe voice: ${err instanceof Error ? err.message : err}`);
+      }
+    } else {
+      failures.voice = true;
+    }
+  }
+
+  if (sources.hasDocument) {
+    try {
+      documentInfo = await sources.downloadDocument();
+    } catch (err) {
+      failures.document = true;
+      console.error(`[${adapter.platform}] Failed to download document: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  return { imagePath, voicePath, voiceTranscript, documentInfo, failures };
+}
+
+// ---------------------------------------------------------------------------
 // Authorization
 // ---------------------------------------------------------------------------
 
@@ -71,10 +151,6 @@ export function checkAuthorization(userId: string | undefined, allowedIds: reado
 // Built-in command handling
 // ---------------------------------------------------------------------------
 
-export type BuiltInResult =
-  | { handled: true }
-  | { handled: false };
-
 const BUILT_IN_COMMANDS = new Set(["/start", "/reset", "/compact", "/status", "/context"]);
 
 export function isBuiltInCommand(command: string | null): boolean {
@@ -86,34 +162,34 @@ export async function handleBuiltInCommand(
   adapter: PlatformAdapter,
   chatId: string,
   threadId?: string,
-): Promise<BuiltInResult> {
+): Promise<boolean> {
   if (command === "/start") {
     await adapter.sendMessage(
       chatId,
       "Hello! Send me a message and I'll respond using Claude.\nUse /reset to start a fresh session.",
       threadId,
     );
-    return { handled: true };
+    return true;
   }
 
   if (command === "/reset") {
     await resetDefaultSession();
     await adapter.sendMessage(chatId, "Global session reset. Next message starts fresh.", threadId);
-    return { handled: true };
+    return true;
   }
 
   if (command === "/compact") {
     await adapter.sendMessage(chatId, "\u23F3 Compacting session...", threadId);
     const result = await compactCurrentSession();
     await adapter.sendMessage(chatId, result.message, threadId);
-    return { handled: true };
+    return true;
   }
 
   if (command === "/status") {
     const session = await peekDefaultSession();
     if (!session) {
       await adapter.sendMessage(chatId, "\uD83D\uDCCA No active session.", threadId);
-      return { handled: true };
+      return true;
     }
     const lines = formatSessionStatus(session, getSettings());
     const sessions = await listSessions();
@@ -127,20 +203,20 @@ export async function handleBuiltInCommand(
       }
     }
     await adapter.sendMessage(chatId, lines.join("\n"), threadId);
-    return { handled: true };
+    return true;
   }
 
   if (command === "/context") {
     const session = await peekDefaultSession();
     if (!session) {
       await adapter.sendMessage(chatId, "No active session.", threadId);
-      return { handled: true };
+      return true;
     }
     try {
       const usage = await getContextUsage(session.sessionId);
       if (!usage) {
         await adapter.sendMessage(chatId, "No usage data found.", threadId);
-        return { handled: true };
+        return true;
       }
       const msg = formatContextUsage(usage, session.turnCount ?? 0);
       await adapter.sendMessage(chatId, msg.join("\n"), threadId);
@@ -151,17 +227,17 @@ export async function handleBuiltInCommand(
         threadId,
       );
     }
-    return { handled: true };
+    return true;
   }
 
-  return { handled: false };
+  return false;
 }
 
 // ---------------------------------------------------------------------------
 // Skill routing
 // ---------------------------------------------------------------------------
 
-export async function resolveSkill(
+async function resolveSkill(
   command: string,
   debugLog: (msg: string) => void,
 ): Promise<string | null> {
@@ -189,14 +265,15 @@ export function extractCommand(text: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Prompt assembly
+// Prompt assembly (internal)
 // ---------------------------------------------------------------------------
 
-export function buildPrompt(
+function buildPrompt(
   adapter: PlatformAdapter,
   ctx: ChatContext,
   skillContext: string | null,
   command: string | null,
+  failures: { image?: boolean; voice?: boolean; document?: boolean },
 ): string {
   const platformName = adapter.platform === "discord" ? "Discord" : "Telegram";
   const parts = [`[${platformName} from ${ctx.username}]`];
@@ -212,48 +289,31 @@ export function buildPrompt(
     parts.push(`Message: ${ctx.rawContent}`);
   }
 
+  // Image
   if (ctx.imagePath) {
     parts.push(`Image path: ${ctx.imagePath}`);
     parts.push("The user attached an image. Inspect this image file directly before answering.");
-  } else if (ctx.imagePath === null && ctx.rawContent === "" && false) {
-    // placeholder — actual "download failed" is handled by caller setting imagePath to null
+  } else if (failures.image) {
+    parts.push("The user attached an image, but downloading it failed. Respond and ask them to resend.");
   }
 
+  // Voice
   if (ctx.voiceTranscript) {
     parts.push(`Voice transcript: ${ctx.voiceTranscript}`);
     parts.push("The user attached voice audio. Use the transcript as their spoken message.");
+  } else if (failures.voice) {
+    parts.push("The user attached voice audio, but it could not be transcribed. Respond and ask them to resend a clearer clip.");
   }
 
+  // Document
   if (ctx.documentInfo) {
     parts.push(`Document path: ${ctx.documentInfo.localPath}`);
     parts.push(`Original filename: ${ctx.documentInfo.originalName}`);
     parts.push("The user attached a document. Read and process this file directly.");
-  }
-
-  return parts.join("\n");
-}
-
-/**
- * Append media failure hints to an existing prompt.
- * Called by the platform after building the base prompt, to add fallback messages
- * for attachments that failed to download.
- */
-export function appendMediaFailures(
-  prompt: string,
-  failures: { image?: boolean; voice?: boolean; document?: boolean },
-): string {
-  const parts = [prompt];
-  if (failures.image) {
-    parts.push("The user attached an image, but downloading it failed. Respond and ask them to resend.");
-  }
-  if (failures.voice) {
-    parts.push(
-      "The user attached voice audio, but it could not be transcribed. Respond and ask them to resend a clearer clip.",
-    );
-  }
-  if (failures.document) {
+  } else if (failures.document) {
     parts.push("The user attached a document, but downloading it failed. Respond and ask them to resend.");
   }
+
   return parts.join("\n");
 }
 
@@ -261,7 +321,7 @@ export function appendMediaFailures(
 // Response processing
 // ---------------------------------------------------------------------------
 
-export async function processResponse(
+async function processResponse(
   adapter: PlatformAdapter,
   ctx: ChatContext,
   result: RunResult,
@@ -346,64 +406,71 @@ export function logIncomingMessage(
 // Full message handler (shared pipeline)
 // ---------------------------------------------------------------------------
 
+export interface HandleMessageOpts {
+  /** Allowed user IDs for authorization. Empty = all users allowed. */
+  allowedUserIds?: readonly string[];
+  /** Pre-extracted command (if platform already parsed it). */
+  command?: string | null;
+  /** Skip built-in command handling (e.g. Discord handles via interactions). */
+  skipBuiltInCommands?: boolean;
+  /** Media download failure flags (set by downloadAndTranscribe). */
+  failures?: { image?: boolean; voice?: boolean; document?: boolean };
+}
+
 /**
  * Handle an incoming user message through the shared pipeline:
- * auth check → built-in commands → skill routing → prompt assembly → run → response.
+ * auth → built-in commands → skill routing → prompt assembly → run → response.
  *
- * Platform-specific logic (attachment downloading, thread management, etc.)
- * should be done BEFORE calling this function, populating the ChatContext.
+ * Includes error wrapping — platforms don't need their own try/catch for the
+ * Claude execution pipeline.
  *
- * @param adapter Platform-specific adapter
- * @param ctx Normalized chat context
- * @param opts Options for media failure hints
- * @returns true if the message was handled, false if it was skipped (e.g. unauthorized)
+ * @returns true if the message was handled, false if skipped (e.g. unauthorized)
  */
 export async function handleChatMessage(
   adapter: PlatformAdapter,
   ctx: ChatContext,
-  opts?: {
-    /** Set if image attachment existed but download failed */
-    imageDownloadFailed?: boolean;
-    /** Set if voice existed but transcription failed */
-    voiceTranscribeFailed?: boolean;
-    /** Set if document existed but download failed */
-    documentDownloadFailed?: boolean;
-    /** Pre-extracted command (if platform already parsed it) */
-    command?: string | null;
-    /** Skip built-in command handling (e.g. Discord handles via interactions) */
-    skipBuiltInCommands?: boolean;
-  },
+  opts?: HandleMessageOpts,
 ): Promise<boolean> {
+  // Authorization
+  if (opts?.allowedUserIds) {
+    if (!checkAuthorization(ctx.userId, opts.allowedUserIds)) {
+      if (ctx.isDM) {
+        await adapter.sendMessage(ctx.chatId, "Unauthorized.", ctx.threadId);
+      } else {
+        adapter.debugLog(`Skip message chat=${ctx.chatId} from=${ctx.userId} reason=unauthorized_user`);
+      }
+      return false;
+    }
+  }
+
   const command = opts?.command ?? extractCommand(ctx.rawContent);
+  const failures = opts?.failures ?? {};
 
   // Built-in commands
   if (!opts?.skipBuiltInCommands && isBuiltInCommand(command)) {
-    const result = await handleBuiltInCommand(command!, adapter, ctx.chatId, ctx.threadId);
-    if (result.handled) return true;
+    return handleBuiltInCommand(command!, adapter, ctx.chatId, ctx.threadId);
   }
 
-  // Skill routing
-  let skillContext: string | null = null;
-  if (command && !isBuiltInCommand(command)) {
-    skillContext = await resolveSkill(command, (msg) => adapter.debugLog(msg));
+  try {
+    // Skill routing
+    let skillContext: string | null = null;
+    if (command && !isBuiltInCommand(command)) {
+      skillContext = await resolveSkill(command, (msg) => adapter.debugLog(msg));
+    }
+
+    // Prompt assembly
+    const prompt = buildPrompt(adapter, ctx, skillContext, command, failures);
+
+    // Run Claude
+    const result = await runUserMessage(adapter.platform, prompt, ctx.sessionKey);
+
+    // Process response
+    await processResponse(adapter, ctx, result);
+    return true;
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`[${adapter.platform}] Error for ${ctx.username}: ${errMsg}`);
+    await adapter.sendMessage(ctx.chatId, `Error: ${errMsg}`, ctx.threadId);
+    return false;
   }
-
-  // Prompt assembly
-  let prompt = buildPrompt(adapter, ctx, skillContext, command);
-  prompt = appendMediaFailures(prompt, {
-    image: opts?.imageDownloadFailed,
-    voice: opts?.voiceTranscribeFailed,
-    document: opts?.documentDownloadFailed,
-  });
-
-  // Run
-  const result = await runUserMessage(
-    adapter.platform,
-    prompt,
-    ctx.sessionKey,
-  );
-
-  // Process response
-  await processResponse(adapter, ctx, result);
-  return true;
 }

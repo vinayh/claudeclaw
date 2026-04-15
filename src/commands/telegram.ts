@@ -1,6 +1,5 @@
 import { ensureProjectClaudeMd, run } from "../runner";
 import { getSettings, loadSettings } from "../config";
-import { transcribeAudioToText } from "../whisper";
 import { listSkills } from "../skills";
 import { mkdir } from "node:fs/promises";
 import { extname, join } from "node:path";
@@ -11,11 +10,10 @@ import {
 import {
   type PlatformAdapter,
   type ChatContext,
-  checkAuthorization,
+  downloadAndTranscribe,
   handleChatMessage,
   logIncomingMessage,
   withTypingIndicator,
-  extractCommand,
 } from "../chat-handler";
 
 // --- Markdown → Telegram HTML conversion (ported from nanobot) ---
@@ -557,6 +555,7 @@ function createTelegramAdapter(token: string): PlatformAdapter {
     platform: ChatPlatform.Telegram,
     maxMessageLength: 4096,
     typingIntervalMs: 4000,
+    debug: telegramDebug,
     sendMessage: (chatId, text, threadId?) =>
       sendMessage(token, Number(chatId), text, threadId ? Number(threadId) : undefined),
     sendTyping: (chatId, threadId?) =>
@@ -586,36 +585,20 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
 
   if (!isPrivate && !isGroup) return;
 
+  // Platform-specific: trigger decision
   const triggerReason = isGroup ? groupTriggerReason(message) : "private_chat";
   if (isGroup && !triggerReason) {
-    debugLog(
-      `Skip group message chat=${chatId} from=${userId ?? "unknown"} reason=no_trigger text="${(text ?? "").slice(0, 80)}"`
-    );
+    debugLog(`Skip group message chat=${chatId} from=${userId ?? "unknown"} reason=no_trigger text="${(text ?? "").slice(0, 80)}"`);
     return;
   }
-  debugLog(
-    `Handle message chat=${chatId} type=${chatType} from=${userId ?? "unknown"} reason=${triggerReason} text="${(text ?? "").slice(0, 80)}"`
-  );
-
-  // Authorization check (shared)
-  const userIdStr = userId ? String(userId) : undefined;
-  const allowedStrs = config.allowedUserIds.map(String);
-  if (!checkAuthorization(userIdStr, allowedStrs)) {
-    if (isPrivate) {
-      await sendMessage(config.token, chatId, "Unauthorized.");
-    } else {
-      console.log(`[Telegram] Ignored group message from unauthorized user ${userId} in chat ${chatId}`);
-      debugLog(`Skip group message chat=${chatId} from=${userId} reason=unauthorized_user`);
-    }
-    return;
-  }
+  debugLog(`Handle message chat=${chatId} type=${chatType} from=${userId ?? "unknown"} reason=${triggerReason} text="${(text ?? "").slice(0, 80)}"`);
 
   if (!text.trim() && !hasImage && !hasVoice && !hasDocument) {
     debugLog(`Skip message chat=${chatId} from=${userId ?? "unknown"} reason=empty_text`);
     return;
   }
 
-  // Secretary: detect reply to a bot alert message → treat as custom reply (Telegram-specific)
+  // Platform-specific: secretary reply detection
   const replyToMsgId = message.reply_to_message?.message_id;
   if (replyToMsgId && text && botId && message.reply_to_message?.from?.id === botId) {
     try {
@@ -647,88 +630,33 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
   const threadIdStr = threadId ? String(threadId) : undefined;
 
   await withTypingIndicator(adapter, chatIdStr, threadIdStr, async () => {
-    try {
-      // Download attachments (platform-specific)
-      let imagePath: string | null = null;
-      let voicePath: string | null = null;
-      let voiceTranscript: string | null = null;
-      let imageDownloadFailed = false;
-      let voiceTranscribeFailed = false;
-      let documentDownloadFailed = false;
+    // Shared: download attachments + transcribe
+    const attachments = await downloadAndTranscribe({
+      hasImage,
+      hasVoice,
+      hasDocument,
+      downloadImage: () => downloadImageFromMessage(config.token, message),
+      downloadVoice: () => downloadVoiceFromMessage(config.token, message),
+      downloadDocument: () => downloadDocumentFromMessage(config.token, message),
+    }, adapter);
 
-      if (hasImage) {
-        try {
-          imagePath = await downloadImageFromMessage(config.token, message);
-        } catch (err) {
-          imageDownloadFailed = true;
-          console.error(`[Telegram] Failed to download image for ${label}: ${err instanceof Error ? err.message : err}`);
-        }
-      }
+    const command = text ? extractTelegramCommand(text) : null;
 
-      if (hasVoice) {
-        try {
-          voicePath = await downloadVoiceFromMessage(config.token, message);
-        } catch (err) {
-          console.error(`[Telegram] Failed to download voice for ${label}: ${err instanceof Error ? err.message : err}`);
-        }
-
-        if (voicePath) {
-          try {
-            debugLog(`Voice file saved: path=${voicePath}`);
-            voiceTranscript = await transcribeAudioToText(voicePath, {
-              debug: telegramDebug,
-              log: (msg) => debugLog(msg),
-            });
-          } catch (err) {
-            voiceTranscribeFailed = true;
-            console.error(`[Telegram] Failed to transcribe voice for ${label}: ${err instanceof Error ? err.message : err}`);
-          }
-        } else if (hasVoice) {
-          voiceTranscribeFailed = true;
-        }
-      }
-
-      let documentInfo: { localPath: string; originalName: string } | null = null;
-      if (hasDocument) {
-        try {
-          documentInfo = await downloadDocumentFromMessage(config.token, message);
-        } catch (err) {
-          documentDownloadFailed = true;
-          console.error(
-            `[Telegram] Failed to download document for ${label}: ${err instanceof Error ? err.message : err}`
-          );
-        }
-      }
-
-      // Extract command for Telegram (handles @botname stripping)
-      const command = text ? extractTelegramCommand(text) : null;
-
-      // Shared message handling pipeline
-      const ctx: ChatContext = {
-        chatId: chatIdStr,
-        userId: userIdStr ?? "unknown",
-        username: label,
-        messageId: String(message.message_id),
-        isDM: isPrivate,
-        threadId: threadIdStr,
-        rawContent: text,
-        imagePath,
-        voicePath,
-        voiceTranscript,
-        documentInfo,
-      };
-
-      await handleChatMessage(adapter, ctx, {
-        command,
-        imageDownloadFailed,
-        voiceTranscribeFailed,
-        documentDownloadFailed,
-      });
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(`[Telegram] Error for ${label}: ${errMsg}`);
-      await sendMessage(config.token, chatId, `Error: ${errMsg}`, threadId);
-    }
+    // Shared: full message pipeline (auth, commands, skill, prompt, run, response, errors)
+    await handleChatMessage(adapter, {
+      chatId: chatIdStr,
+      userId: userId ? String(userId) : "unknown",
+      username: label,
+      messageId: String(message.message_id),
+      isDM: isPrivate,
+      threadId: threadIdStr,
+      rawContent: text,
+      ...attachments,
+    }, {
+      allowedUserIds: config.allowedUserIds.map(String),
+      command,
+      failures: attachments.failures,
+    });
   });
 }
 
