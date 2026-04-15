@@ -1,13 +1,19 @@
 import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession } from "../runner";
 import { getSettings, loadSettings } from "../config";
 import { resetDefaultSession, peekDefaultSession } from "../sessionManager";
-import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { transcribeAudioToText } from "../whisper";
 import { resolveSkillPrompt, listSkills } from "../skills";
 import { mkdir } from "node:fs/promises";
 import { extname, join } from "node:path";
+import {
+  ChatPlatform,
+  getInboxDir,
+  extractReactionDirective,
+  extractSendFileDirectives,
+  getContextUsage,
+  formatContextUsage,
+  formatSessionStatus,
+} from "../chat-utils";
 
 // --- Markdown → Telegram HTML conversion (ported from nanobot) ---
 
@@ -274,12 +280,6 @@ function extensionFromAudioMimeType(mimeType?: string): string {
   }
 }
 
-function buildProgressBar(current: number, max: number, width: number = 20): string {
-  const ratio = Math.min(current / max, 1);
-  const filled = Math.round(ratio * width);
-  return "█".repeat(filled) + "░".repeat(width - filled);
-}
-
 function extractTelegramCommand(text: string): string | null {
   const firstToken = text.trim().split(/\s+/, 1)[0];
   if (!firstToken.startsWith("/")) return null;
@@ -302,20 +302,24 @@ async function sendMessage(token: string, chatId: number, text: string, threadId
   const normalized = normalizeTelegramText(text).replace(/\[react:[^\]\r\n]+\]/gi, "");
   const html = markdownToTelegramHtml(normalized);
   const MAX_LEN = 4096;
-  for (let i = 0; i < html.length; i += MAX_LEN) {
-    try {
+  const threadOpts = threadId ? { message_thread_id: threadId } : {};
+
+  // Try HTML first; on parse failure fall back to plain text with correct chunking
+  try {
+    for (let i = 0; i < html.length; i += MAX_LEN) {
       await callApi(token, "sendMessage", {
         chat_id: chatId,
         text: html.slice(i, i + MAX_LEN),
         parse_mode: "HTML",
-        ...(threadId ? { message_thread_id: threadId } : {}),
+        ...threadOpts,
       });
-    } catch {
-      // Fallback to plain text if HTML parsing fails
+    }
+  } catch {
+    for (let i = 0; i < normalized.length; i += MAX_LEN) {
       await callApi(token, "sendMessage", {
         chat_id: chatId,
         text: normalized.slice(i, i + MAX_LEN),
-        ...(threadId ? { message_thread_id: threadId } : {}),
+        ...threadOpts,
       });
     }
   }
@@ -355,37 +359,6 @@ async function sendDocumentToChat(
     const body = await res.text();
     throw new Error(`Telegram sendDocument failed: ${res.status} ${body}`);
   }
-}
-
-function extractReactionDirective(text: string): { cleanedText: string; reactionEmoji: string | null } {
-  let reactionEmoji: string | null = null;
-  const cleanedText = text
-    .replace(/\[react:([^\]\r\n]+)\]/gi, (_match, raw) => {
-      const candidate = String(raw).trim();
-      if (!reactionEmoji && candidate) reactionEmoji = candidate;
-      return "";
-    })
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  return { cleanedText, reactionEmoji };
-}
-
-function extractSendFileDirectives(text: string): {
-  cleanedText: string;
-  filePaths: string[];
-} {
-  const filePaths: string[] = [];
-  const cleanedText = text
-    .replace(/\[send-file:([^\]\r\n]+)\]/gi, (_match, raw) => {
-      const candidate = String(raw).trim();
-      if (candidate) filePaths.push(candidate);
-      return "";
-    })
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  return { cleanedText, filePaths };
 }
 
 async function sendReaction(token: string, chatId: number, messageId: number, emoji: string): Promise<void> {
@@ -436,7 +409,7 @@ async function downloadImageFromMessage(token: string, message: TelegramMessage)
   const response = await fetch(downloadUrl);
   if (!response.ok) throw new Error(`Telegram file download failed: ${response.status} ${response.statusText}`);
 
-  const dir = join(process.cwd(), ".claude", "claudeclaw", "inbox", "telegram");
+  const dir = getInboxDir(ChatPlatform.Telegram);
   await mkdir(dir, { recursive: true });
 
   const remoteExt = extname(remotePath);
@@ -467,7 +440,7 @@ async function downloadVoiceFromMessage(token: string, message: TelegramMessage)
   const response = await fetch(downloadUrl);
   if (!response.ok) throw new Error(`Telegram file download failed: ${response.status} ${response.statusText}`);
 
-  const dir = join(process.cwd(), ".claude", "claudeclaw", "inbox", "telegram");
+  const dir = getInboxDir(ChatPlatform.Telegram);
   await mkdir(dir, { recursive: true });
 
   const remoteExt = extname(remotePath);
@@ -515,7 +488,7 @@ async function downloadDocumentFromMessage(
     throw new Error(`Telegram file download failed: ${response.status} ${response.statusText}`);
   }
 
-  const dir = join(process.cwd(), ".claude", "claudeclaw", "inbox", "telegram");
+  const dir = getInboxDir(ChatPlatform.Telegram);
   await mkdir(dir, { recursive: true });
 
   const originalName = doc.file_name ?? `document${extname(remotePath) || ""}`;
@@ -633,21 +606,11 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
 
   if (command === "/status") {
     const session = await peekDefaultSession();
-    const settings = getSettings();
     if (!session) {
       await sendMessage(config.token, chatId, "📊 No active session.", threadId);
       return;
     }
-    const lines = [
-      "📊 **Session Status**",
-      `Session: \`${session.sessionId.slice(0, 8)}\``,
-      `Turns: ${session.turnCount ?? 0}`,
-      `Model: ${settings.model || "default"}`,
-      `Security: ${settings.security.level}`,
-      `Created: ${session.createdAt}`,
-      `Last used: ${session.lastUsedAt}`,
-      `Compact warned: ${session.compactWarned ? "yes" : "no"}`,
-    ];
+    const lines = formatSessionStatus(session, getSettings());
     await sendMessage(config.token, chatId, lines.join("\n"), threadId);
     return;
   }
@@ -658,48 +621,13 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
       await sendMessage(config.token, chatId, "No active session.", threadId);
       return;
     }
-    const home = homedir();
-    const projectSlug = process.cwd().replace(/\//g, "-");
-    const jsonlPath = `${home}/.claude/projects/${projectSlug}/${session.sessionId}.jsonl`;
-    if (!existsSync(jsonlPath)) {
-      await sendMessage(config.token, chatId, "Conversation file not found.", threadId);
-      return;
-    }
     try {
-      const raw = await readFile(jsonlPath, "utf8");
-      const fileLines = raw.trim().split("\n");
-      let lastUsage: any = null;
-      let totalOutput = 0;
-      for (const line of fileLines) {
-        try {
-          const obj = JSON.parse(line);
-          if (obj.message?.usage) lastUsage = obj.message.usage;
-          if (obj.message?.usage?.output_tokens) totalOutput += obj.message.usage.output_tokens;
-        } catch {}
-      }
-      if (!lastUsage) {
+      const usage = await getContextUsage(session.sessionId);
+      if (!usage) {
         await sendMessage(config.token, chatId, "No usage data found.", threadId);
         return;
       }
-      const input = lastUsage.input_tokens ?? 0;
-      const cacheCreation = lastUsage.cache_creation_input_tokens ?? 0;
-      const cacheRead = lastUsage.cache_read_input_tokens ?? 0;
-      const totalContext = input + cacheCreation + cacheRead;
-      const maxContext = 200000;
-      const pct = ((totalContext / maxContext) * 100).toFixed(1);
-      const bar = buildProgressBar(totalContext, maxContext);
-      const msg = [
-        `📐 **Context Window**`,
-        `${bar} ${pct}%`,
-        ``,
-        `Total: \`${totalContext.toLocaleString()}\` / \`${maxContext.toLocaleString()}\` tokens`,
-        `├ Input: \`${input.toLocaleString()}\``,
-        `├ Cache creation: \`${cacheCreation.toLocaleString()}\``,
-        `├ Cache read: \`${cacheRead.toLocaleString()}\``,
-        `└ Output (cumulative): \`${totalOutput.toLocaleString()}\``,
-        ``,
-        `Turns: ${session.turnCount ?? 0}`,
-      ];
+      const msg = formatContextUsage(usage, session.turnCount ?? 0);
       await sendMessage(config.token, chatId, msg.join("\n"), threadId);
     } catch (err) {
       await sendMessage(config.token, chatId, `Failed to read context: ${err instanceof Error ? err.message : err}`, threadId);

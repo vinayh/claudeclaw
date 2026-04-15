@@ -8,7 +8,7 @@ import { writePidFile, cleanupPidFile, checkExistingDaemon } from "../pid";
 import { initConfig, loadSettings, reloadSettings, resolvePrompt, type HeartbeatConfig, type Settings } from "../config";
 import { getDayAndMinuteAtOffset } from "../timezone";
 import { startWebUi, type WebServerHandle } from "../web";
-import { HEARTBEAT_DIR, STATUSLINE_FILE, CLAUDE_SETTINGS_FILE } from "../paths";
+import { CLAUDE_DIR, HEARTBEAT_DIR, STATUSLINE_FILE, CLAUDE_SETTINGS_FILE } from "../paths";
 import type { Job } from "../jobs";
 
 const PREFLIGHT_SCRIPT = fileURLToPath(new URL("../preflight.ts", import.meta.url));

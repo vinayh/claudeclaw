@@ -1,4 +1,4 @@
-import type { Settings } from "../config";
+import type { Settings, HeartbeatExcludeWindow } from "../config";
 import type { Job } from "../jobs";
 
 export interface WebSnapshot {
@@ -24,7 +24,7 @@ export interface StartWebUiOptions {
     enabled?: boolean;
     interval?: number;
     prompt?: string;
-    excludeWindows?: Array<{ days?: number[]; start: string; end: string }>;
+    excludeWindows?: HeartbeatExcludeWindow[];
   }) => void | Promise<void>;
   onJobsChanged?: () => void | Promise<void>;
   onChat?: (

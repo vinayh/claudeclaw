@@ -202,6 +202,7 @@ const DEFAULT_IMPLEMENTATION_MODE: AgenticMode = {
     "test", "commit", "push", "merge", "release",
     "generate", "scaffold", "setup", "initialize",
   ],
+  phrases: undefined,
 };
 
 const DEFAULT_MODES: AgenticMode[] = [DEFAULT_PLANNING_MODE, DEFAULT_IMPLEMENTATION_MODE];

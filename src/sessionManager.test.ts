@@ -250,6 +250,24 @@ describe("sessionManager", () => {
       expect(backupName).toBe("session_4.backup");
     });
 
+    it("backup content matches session data even when legacy file exists", async () => {
+      await createSession(DEFAULT_SESSION_KEY, "uuid-real-session");
+      // Simulate a legacy session.json with different content
+      await writeFile(join(tempDir, "session.json"), JSON.stringify({ old: "legacy-data" }));
+
+      const backupName = await backupDefaultSession();
+      expect(backupName).toBe("session_1.backup");
+
+      const backupContent = JSON.parse(await readFile(join(tempDir, backupName!), "utf-8"));
+      // Backup must contain the real session data, not the legacy file content
+      expect(backupContent.sessionId).toBe("uuid-real-session");
+      expect(backupContent).not.toHaveProperty("old");
+
+      // Legacy file should be cleaned up
+      const files = await readdir(tempDir);
+      expect(files).not.toContain("session.json");
+    });
+
     it("does not affect other sessions", async () => {
       await createSession(DEFAULT_SESSION_KEY, "uuid-default");
       await createSession("discord-chan-1", "uuid-discord");

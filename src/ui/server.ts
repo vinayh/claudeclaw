@@ -45,7 +45,7 @@ export function startWebUi(opts: StartWebUiOptions): WebServerHandle {
             enabled?: boolean;
             interval?: number;
             prompt?: string;
-            excludeWindows?: Array<{ days?: number[]; start: string; end: string }>;
+            excludeWindows?: Array<{ days: number[]; start: string; end: string }>;
           } = {};
 
           if ("enabled" in payload) patch.enabled = Boolean(payload.enabled);
@@ -65,15 +65,16 @@ export function startWebUi(opts: StartWebUiOptions): WebServerHandle {
                 const row = entry as Record<string, unknown>;
                 const start = String(row.start ?? "").trim();
                 const end = String(row.end ?? "").trim();
+                const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
                 const days = Array.isArray(row.days)
                   ? row.days
-                      .map((d) => Number(d))
-                      .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
-                  : undefined;
+                      .map((d: unknown) => Number(d))
+                      .filter((d: number) => Number.isInteger(d) && d >= 0 && d <= 6)
+                  : ALL_DAYS;
                 return {
                   start,
                   end,
-                  ...(days && days.length > 0 ? { days } : {}),
+                  days: days.length > 0 ? days : ALL_DAYS,
                 };
               });
           }
@@ -198,6 +199,6 @@ export function startWebUi(opts: StartWebUiOptions): WebServerHandle {
   return {
     stop: () => server.stop(),
     host: opts.host,
-    port: server.port,
+    port: server.port ?? opts.port,
   };
 }

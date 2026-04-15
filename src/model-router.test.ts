@@ -13,6 +13,7 @@ const IMPLEMENTATION_MODE: AgenticMode = {
   name: "implementation",
   model: "sonnet",
   keywords: ["implement", "code", "write", "build", "fix", "deploy"],
+  phrases: undefined,
 };
 
 const DEFAULT_MODES = [PLANNING_MODE, IMPLEMENTATION_MODE];

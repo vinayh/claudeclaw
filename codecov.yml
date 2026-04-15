@@ -1,0 +1,28 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+    patch:
+      default:
+        target: auto
+
+flags:
+  unittests:
+    paths:
+      - src/
+
+# Ensure all source files appear in reports, even without direct test coverage
+component_management:
+  default_rules:
+    paths:
+      - src/**
+
+# Show all project source files in the Codecov UI, not just tested ones
+ignore:
+  - "node_modules/**"
+  - "skills/**"
+  - "prompts/**"
+  - "commands/**"
+  - ".claude-plugin/**"
+  - "hooks/**"

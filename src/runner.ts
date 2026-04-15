@@ -110,6 +110,12 @@ function buildChildEnv(baseEnv: Record<string, string>, model: string, api: stri
   return childEnv;
 }
 
+/** Strip CLAUDECODE env var so child claude processes don't think they're nested. */
+function getCleanEnv(): Record<string, string> {
+  const { CLAUDECODE: _, ...rest } = process.env;
+  return { ...rest } as Record<string, string>;
+}
+
 /** Default timeout for a single Claude Code invocation (5 minutes). */
 const CLAUDE_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -132,8 +138,9 @@ async function runClaudeOnce(
     cwd: cwd ?? PROJECT_DIR,
   });
 
+  let timeoutTimer: ReturnType<typeof setTimeout>;
   const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error(`Claude session timed out after ${timeoutMs / 1000}s`)), timeoutMs);
+    timeoutTimer = setTimeout(() => reject(new Error(`Claude session timed out after ${timeoutMs / 1000}s`)), timeoutMs);
   });
 
   try {
@@ -144,6 +151,7 @@ async function runClaudeOnce(
       ]),
       timeoutPromise,
     ]) as [string, string];
+    clearTimeout(timeoutTimer!);
     await proc.exited;
 
     return {
@@ -152,6 +160,7 @@ async function runClaudeOnce(
       exitCode: proc.exitCode ?? 1,
     };
   } catch (err) {
+    clearTimeout(timeoutTimer!);
     // Kill the hung process
     try { proc.kill("SIGTERM"); } catch {}
     setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, 5000);
@@ -324,8 +333,7 @@ export async function compactCurrentSession(): Promise<{ success: boolean; messa
 
   const settings = getSettings();
   const securityArgs = buildSecurityArgs(settings.security);
-  const { CLAUDECODE: _, ...cleanEnv } = process.env;
-  const baseEnv = { ...cleanEnv } as Record<string, string>;
+  const baseEnv = getCleanEnv();
   const timeoutMs = settings.sessionTimeoutMs;
 
   const ok = await runCompact(
@@ -414,9 +422,7 @@ async function execClaude(name: string, prompt: string, sessionKey: string): Pro
     args.push("--append-system-prompt", appendParts.join("\n\n"));
   }
 
-  // Strip CLAUDECODE env var so child claude processes don't think they're nested
-  const { CLAUDECODE: _, ...cleanEnv } = process.env;
-  const baseEnv = { ...cleanEnv } as Record<string, string>;
+  const baseEnv = getCleanEnv();
 
   // Per-session working directory
   const sessionCwd = getSessionCwd(sessionKey);
@@ -581,8 +587,13 @@ async function streamClaude(
   const normalizedModel = model.trim().toLowerCase();
   if (model.trim() && normalizedModel !== "glm") args.push("--model", model.trim());
 
-  const { CLAUDECODE: _, ...cleanEnv } = process.env;
-  const childEnv = buildChildEnv(cleanEnv as Record<string, string>, model, api);
+  // Per-session working directory and memory isolation (matches execClaude)
+  const sessionCwd = getSessionCwd(DEFAULT_SESSION_KEY);
+  await mkdir(sessionCwd, { recursive: true });
+  const memoryDir = join(sessionCwd, "memory");
+  args.push("--settings", JSON.stringify({ autoMemoryDirectory: memoryDir }));
+
+  const childEnv = buildChildEnv(getCleanEnv(), model, api);
 
   console.log(`[${new Date().toLocaleTimeString()}] Running: ${name} (stream-json, session: ${existing?.sessionId?.slice(0, 8) ?? "new"})`);
 
@@ -590,6 +601,7 @@ async function streamClaude(
     stdout: "pipe",
     stderr: "pipe",
     env: childEnv,
+    cwd: sessionCwd,
   });
 
   const reader = proc.stdout.getReader();

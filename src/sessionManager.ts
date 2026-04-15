@@ -1,5 +1,5 @@
 import { join } from "path";
-import { unlink, readdir, rename } from "fs/promises";
+import { unlink, readdir } from "fs/promises";
 import * as paths from "./paths";
 
 /** Key for the shared session used by heartbeat, cron, telegram, web UI, etc. */
@@ -170,7 +170,7 @@ export async function backupDefaultSession(): Promise<string | null> {
   await removeSession(DEFAULT_SESSION_KEY);
 
   // Also clean up legacy session.json if it exists
-  try { await rename(paths.SESSION_FILE, backupPath); } catch { /* already gone or already backed up above */ }
+  try { await unlink(paths.SESSION_FILE); } catch { /* already gone */ }
 
   return backupName;
 }
