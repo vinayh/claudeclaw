@@ -3,7 +3,7 @@ import { readdir, readFile } from "fs/promises";
 import { homedir } from "os";
 import { PID_FILE, STATE_FILE, SETTINGS_FILE, JOBS_DIR } from "../paths";
 
-function formatCountdown(ms: number): string {
+export function formatCountdown(ms: number): string {
   if (ms <= 0) return "now!";
   const s = Math.floor(ms / 1000);
   const h = Math.floor(s / 3600);
@@ -13,7 +13,7 @@ function formatCountdown(ms: number): string {
   return "<1m";
 }
 
-function decodePath(encoded: string): string {
+export function decodePath(encoded: string): string {
   return "/" + encoded.slice(1).replace(/-/g, "/");
 }
 

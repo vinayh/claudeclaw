@@ -71,7 +71,7 @@ function enqueue<T>(fn: () => Promise<T>, sessionKey: string): Promise<T> {
   return task;
 }
 
-function extractRateLimitMessage(stdout: string, stderr: string): string | null {
+export function extractRateLimitMessage(stdout: string, stderr: string): string | null {
   const candidates = [stdout, stderr];
   for (const text of candidates) {
     const trimmed = text.trim();
@@ -80,15 +80,15 @@ function extractRateLimitMessage(stdout: string, stderr: string): string | null 
   return null;
 }
 
-function sameModelConfig(a: ModelConfig, b: ModelConfig): boolean {
+export function sameModelConfig(a: ModelConfig, b: ModelConfig): boolean {
   return a.model.trim().toLowerCase() === b.model.trim().toLowerCase() && a.api.trim() === b.api.trim();
 }
 
-function hasModelConfig(value: ModelConfig): boolean {
+export function hasModelConfig(value: ModelConfig): boolean {
   return value.model.trim().length > 0 || value.api.trim().length > 0;
 }
 
-function isNotFoundError(error: unknown): boolean {
+export function isNotFoundError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const code = (error as { code?: unknown }).code;
   if (code === "ENOENT") return true;
@@ -96,7 +96,7 @@ function isNotFoundError(error: unknown): boolean {
   return /enoent|no such file or directory/i.test(message);
 }
 
-function buildChildEnv(baseEnv: Record<string, string>, model: string, api: string): Record<string, string> {
+export function buildChildEnv(baseEnv: Record<string, string>, model: string, api: string): Record<string, string> {
   const childEnv: Record<string, string> = { ...baseEnv };
   const normalizedModel = model.trim().toLowerCase();
 
@@ -111,7 +111,7 @@ function buildChildEnv(baseEnv: Record<string, string>, model: string, api: stri
 }
 
 /** Strip CLAUDECODE env var so child claude processes don't think they're nested. */
-function getCleanEnv(): Record<string, string> {
+export function getCleanEnv(): Record<string, string> {
   const { CLAUDECODE: _, ...rest } = process.env;
   return { ...rest } as Record<string, string>;
 }
@@ -232,7 +232,7 @@ export async function ensureProjectClaudeMd(): Promise<void> {
   }
 }
 
-function buildSecurityArgs(security: SecurityConfig): string[] {
+export function buildSecurityArgs(security: SecurityConfig): string[] {
   const args: string[] = ["--dangerously-skip-permissions"];
 
   switch (security.level) {

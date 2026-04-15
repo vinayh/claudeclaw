@@ -81,7 +81,7 @@ async function collectSkillsFromDir(
   }
 }
 
-function extractDescription(content: string): string {
+export function extractDescription(content: string): string {
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
   if (fmMatch) {
     const fm = fmMatch[1];
