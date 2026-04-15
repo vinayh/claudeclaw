@@ -67,7 +67,14 @@ const sessionQueues = new Map<string, Promise<unknown>>();
 function enqueue<T>(fn: () => Promise<T>, sessionKey: string): Promise<T> {
   const current = sessionQueues.get(sessionKey) ?? Promise.resolve();
   const task = current.then(fn, fn);
-  sessionQueues.set(sessionKey, task.catch(() => {}));
+  const sentinel = task.catch((err) => {
+    console.error(`[Runner] Queued task error (session ${sessionKey.slice(0, 8)}):`, err);
+  }).finally(() => {
+    if (sessionQueues.get(sessionKey) === sentinel) {
+      sessionQueues.delete(sessionKey);
+    }
+  });
+  sessionQueues.set(sessionKey, sentinel);
   return task;
 }
 
@@ -368,12 +375,17 @@ async function execClaude(name: string, prompt: string, sessionKey: string): Pro
 
   if (agentic.enabled) {
     const routing = selectModel(prompt, agentic.modes, agentic.defaultMode);
-    primaryConfig = { model: routing.model, api };
-    taskType = routing.taskType;
-    routingReasoning = routing.reasoning;
-    console.log(
-      `[${new Date().toLocaleTimeString()}] Agentic routing: ${routing.taskType} → ${routing.model} (${routing.reasoning})`
-    );
+    if (!routing.model) {
+      console.warn(`[${new Date().toLocaleTimeString()}] Agentic routing returned empty model, falling back to default`);
+      primaryConfig = { model, api };
+    } else {
+      primaryConfig = { model: routing.model, api };
+      taskType = routing.taskType;
+      routingReasoning = routing.reasoning;
+      console.log(
+        `[${new Date().toLocaleTimeString()}] Agentic routing: ${routing.taskType} → ${routing.model} (${routing.reasoning})`
+      );
+    }
   } else {
     primaryConfig = { model, api };
   }

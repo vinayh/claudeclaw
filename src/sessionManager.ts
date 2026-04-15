@@ -1,5 +1,6 @@
 import { join } from "path";
 import { unlink, readdir } from "fs/promises";
+import { existsSync } from "fs";
 import * as paths from "./paths";
 
 /** Key for the shared session used by heartbeat, cron, telegram, web UI, etc. */
@@ -36,15 +37,18 @@ async function loadSessions(): Promise<SessionsData> {
     }
     sessionsCache = raw;
     return sessionsCache!;
-  } catch {
+  } catch (err) {
+    if (existsSync(paths.SESSIONS_FILE)) {
+      console.warn(`[SessionManager] Sessions file exists but failed to parse, starting fresh:`, err);
+    }
     sessionsCache = { sessions: {} };
     return sessionsCache;
   }
 }
 
 async function saveSessions(data: SessionsData): Promise<void> {
-  sessionsCache = data;
   await Bun.write(paths.SESSIONS_FILE, JSON.stringify(data, null, 2) + "\n");
+  sessionsCache = data;
 }
 
 /** Get session by key. Returns null if no session exists yet. */
@@ -57,9 +61,6 @@ export async function getSession(
 
   if (typeof session.turnCount !== "number") session.turnCount = 0;
   if (typeof session.compactWarned !== "boolean") session.compactWarned = false;
-
-  session.lastUsedAt = new Date().toISOString();
-  await saveSessions(data);
 
   return {
     sessionId: session.sessionId,
@@ -97,6 +98,7 @@ export async function incrementTurn(key: string): Promise<number> {
   if (!session) return 0;
   if (typeof session.turnCount !== "number") session.turnCount = 0;
   session.turnCount += 1;
+  session.lastUsedAt = new Date().toISOString();
   await saveSessions(data);
   return session.turnCount;
 }

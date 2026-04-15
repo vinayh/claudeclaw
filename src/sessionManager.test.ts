@@ -68,7 +68,19 @@ describe("sessionManager", () => {
       expect(raw.sessions["chan-1"].sessionId).toBe("uuid-abc");
     });
 
-    it("updates lastUsedAt on getSession", async () => {
+    it("updates lastUsedAt on incrementTurn", async () => {
+      await createSession("chan-1", "uuid-abc");
+      const entry1 = await peekSessionEntry("chan-1");
+      const before = entry1!.lastUsedAt;
+
+      await new Promise((r) => setTimeout(r, 10));
+      await incrementTurn("chan-1");
+
+      const entry2 = await peekSessionEntry("chan-1");
+      expect(entry2!.lastUsedAt).not.toBe(before);
+    });
+
+    it("does not update lastUsedAt on getSession", async () => {
       await createSession("chan-1", "uuid-abc");
       const entry1 = await peekSessionEntry("chan-1");
       const before = entry1!.lastUsedAt;
@@ -77,7 +89,7 @@ describe("sessionManager", () => {
       await getSession("chan-1");
 
       const entry2 = await peekSessionEntry("chan-1");
-      expect(entry2!.lastUsedAt).not.toBe(before);
+      expect(entry2!.lastUsedAt).toBe(before);
     });
   });
 
