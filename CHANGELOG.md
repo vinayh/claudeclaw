@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.1.0...claudeclaw-v1.1.1) (2026-04-17)
+
+
+### Bug Fixes
+
+* preserve pre-tool text in Discord/Telegram responses ([52d576f](https://github.com/vinayh/claudeclaw/commit/52d576f20cccf60c4acbb6aeeaf1074eb1603a52))
+
 ## [1.1.0](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.0.2...claudeclaw-v1.1.0) (2026-04-15)
 
 
