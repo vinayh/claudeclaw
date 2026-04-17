@@ -126,6 +126,115 @@ export function getCleanEnv(): Record<string, string> {
 /** Default timeout for a single Claude Code invocation (5 minutes). */
 const CLAUDE_TIMEOUT_MS = 5 * 60 * 1000;
 
+/**
+ * Handlers invoked while consuming a stream-json event stream from Claude Code.
+ * Callbacks may be sync or async — the consumer awaits each in turn.
+ */
+export interface StreamJsonHandlers {
+  /** Called once per text content block in an assistant message (in order). */
+  onText?: (text: string) => void | Promise<void>;
+  /** Called once per tool_use content block (in order). */
+  onToolUse?: () => void | Promise<void>;
+  /** Called when the init `system` event arrives with a session_id. */
+  onSessionInit?: (sessionId: string) => void | Promise<void>;
+  /** Called on the final `result` event with its `result` field, if non-empty. */
+  onResult?: (resultText: string) => void | Promise<void>;
+}
+
+/**
+ * Pure: dispatch a single parsed stream-json event to handlers. Exported for tests.
+ * Unknown event shapes are silently ignored — Claude Code's stream-json may grow
+ * new event types across versions and we only care about a handful.
+ */
+export async function handleStreamJsonEvent(
+  event: unknown,
+  handlers: StreamJsonHandlers,
+): Promise<void> {
+  if (!event || typeof event !== "object") return;
+  const e = event as Record<string, unknown>;
+
+  switch (e.type) {
+    case "system": {
+      const sid = typeof e.session_id === "string" ? e.session_id : undefined;
+      if (sid && handlers.onSessionInit) await handlers.onSessionInit(sid);
+      return;
+    }
+    case "assistant": {
+      type ContentBlock = { type?: string; text?: string };
+      const msg = e.message as { content?: ContentBlock[] } | undefined;
+      const blocks = msg?.content ?? [];
+      for (const block of blocks) {
+        if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
+          if (handlers.onText) await handlers.onText(block.text);
+        } else if (block.type === "tool_use") {
+          if (handlers.onToolUse) await handlers.onToolUse();
+        }
+      }
+      return;
+    }
+    case "tool_use": {
+      // Some stream-json versions emit top-level tool_use events too.
+      if (handlers.onToolUse) await handlers.onToolUse();
+      return;
+    }
+    case "result": {
+      const resultText = typeof e.result === "string" ? e.result : "";
+      if (resultText && handlers.onResult) await handlers.onResult(resultText);
+      return;
+    }
+  }
+}
+
+/**
+ * Consume a newline-delimited JSON stream from Claude Code `-p --output-format stream-json`,
+ * dispatching each event to the supplied handlers. Silently skips unparseable lines.
+ */
+export async function consumeStreamJsonStream(
+  stream: ReadableStream<Uint8Array>,
+  handlers: StreamJsonHandlers,
+): Promise<void> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let event: unknown;
+      try {
+        event = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      await handleStreamJsonEvent(event, handlers);
+    }
+  }
+
+  const tail = buf.trim();
+  if (tail) {
+    try {
+      await handleStreamJsonEvent(JSON.parse(tail), handlers);
+    } catch {}
+  }
+}
+
+export interface RunClaudeOnceResult {
+  /** Concatenated text from all assistant text blocks, in order. */
+  rawStdout: string;
+  stderr: string;
+  exitCode: number;
+  /** Session ID captured from the `system` init event, if any. */
+  sessionId: string | null;
+}
+
 async function runClaudeOnce(
   baseArgs: string[],
   model: string,
@@ -133,8 +242,12 @@ async function runClaudeOnce(
   baseEnv: Record<string, string>,
   timeoutMs: number = CLAUDE_TIMEOUT_MS,
   cwd?: string
-): Promise<{ rawStdout: string; stderr: string; exitCode: number }> {
-  const args = [...baseArgs];
+): Promise<RunClaudeOnceResult> {
+  // Stream-json captures every text block emitted during a turn — including text
+  // emitted before tool calls. Default "text" format only surfaces the final text
+  // block and silently drops pre-tool text, producing empty Discord/Telegram replies
+  // when the model ended a turn with a tool call (see kalai session 2026-04-16).
+  const args = [...baseArgs, "--output-format", "stream-json", "--verbose"];
   const normalizedModel = model.trim().toLowerCase();
   if (model.trim() && normalizedModel !== "glm") args.push("--model", model.trim());
 
@@ -150,25 +263,40 @@ async function runClaudeOnce(
     timeoutTimer = setTimeout(() => reject(new Error(`Claude session timed out after ${timeoutMs / 1000}s`)), timeoutMs);
   });
 
+  let assistantText = "";
+  let fallbackResultText = "";
+  let sessionId: string | null = null;
+
+  const handlers: StreamJsonHandlers = {
+    onText: (text) => { assistantText += text; },
+    onSessionInit: (sid) => { sessionId = sid; },
+    onResult: (text) => { fallbackResultText = text; },
+  };
+
   try {
-    const [rawStdout, stderr] = await Promise.race([
+    const [, stderr] = await Promise.race([
       Promise.all([
-        new Response(proc.stdout).text(),
+        consumeStreamJsonStream(proc.stdout, handlers),
         new Response(proc.stderr).text(),
       ]),
       timeoutPromise,
-    ]) as [string, string];
+    ]) as [void, string];
     clearTimeout(timeoutTimer!);
     await proc.exited;
+
+    // If the stream yielded no assistant text but the final result event did,
+    // use that as a safety net. In practice stream-json always carries assistant
+    // text when result has text, so this only kicks in on odd edge cases.
+    const rawStdout = assistantText || fallbackResultText;
 
     return {
       rawStdout,
       stderr,
       exitCode: proc.exitCode ?? 1,
+      sessionId,
     };
   } catch (err) {
     clearTimeout(timeoutTimer!);
-    // Kill the hung process
     try { proc.kill("SIGTERM"); } catch {}
     setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, 5000);
 
@@ -179,6 +307,7 @@ async function runClaudeOnce(
       rawStdout: "",
       stderr: message,
       exitCode: 124,
+      sessionId,
     };
   }
 }
@@ -317,9 +446,9 @@ export async function runCompact(
   securityArgs: string[],
   timeoutMs: number
 ): Promise<boolean> {
+  // runClaudeOnce appends --output-format stream-json --verbose.
   const compactArgs = [
     "claude", "-p", "/compact",
-    "--output-format", "text",
     "--resume", sessionId,
     ...securityArgs,
   ];
@@ -401,10 +530,9 @@ async function execClaude(name: string, prompt: string, sessionKey: string): Pro
     `[${new Date().toLocaleTimeString()}] Running: ${name} (${isNew ? "new session" : `resume ${existing.sessionId.slice(0, 8)}`}, security: ${security.level})`
   );
 
-  // New session: use json output to capture Claude's session_id
-  // Resumed session: use text output with --resume
-  const outputFormat = isNew ? "json" : "text";
-  const args = ["claude", "-p", prompt, "--output-format", outputFormat, ...securityArgs];
+  // Output format (stream-json) is appended inside runClaudeOnce so session_id
+  // and every text block can be captured from the event stream.
+  const args = ["claude", "-p", prompt, ...securityArgs];
 
   if (!isNew) {
     args.push("--resume", existing.sessionId);
@@ -460,25 +588,17 @@ async function execClaude(name: string, prompt: string, sessionKey: string): Pro
   const stderr = exec.stderr;
   const exitCode = exec.exitCode;
   let stdout = rawStdout;
-  let sessionId = existing?.sessionId ?? "unknown";
+  let sessionId = exec.sessionId ?? existing?.sessionId ?? "unknown";
   const rateLimitMessage = extractRateLimitMessage(rawStdout, stderr);
 
   if (rateLimitMessage) {
     stdout = rateLimitMessage;
   }
 
-  // For new sessions, parse the JSON to extract session_id and result text
-  if (!rateLimitMessage && isNew && exitCode === 0) {
-    try {
-      const json = JSON.parse(rawStdout);
-      sessionId = json.session_id;
-      stdout = json.result ?? "";
-      // Save the real session ID from Claude Code
-      await createSession(sessionKey, sessionId);
-      console.log(`[${new Date().toLocaleTimeString()}] Session created: ${sessionId} (key ${sessionKey.slice(0, 8)})`);
-    } catch (e) {
-      console.error(`[${new Date().toLocaleTimeString()}] Failed to parse session from Claude output:`, e);
-    }
+  // Persist the session ID that Claude Code reports for new sessions.
+  if (!rateLimitMessage && isNew && exitCode === 0 && exec.sessionId) {
+    await createSession(sessionKey, exec.sessionId);
+    console.log(`[${new Date().toLocaleTimeString()}] Session created: ${exec.sessionId} (key ${sessionKey.slice(0, 8)})`);
   }
 
   const result: RunResult = {
@@ -616,74 +736,34 @@ async function streamClaude(
     cwd: sessionCwd,
   });
 
-  const reader = proc.stdout.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
   let unblocked = false;
   let textEmitted = false;
-
   const maybeUnblock = () => {
-    if (!unblocked) {
-      unblocked = true;
-      onUnblock();
-    }
+    if (unblocked) return;
+    unblocked = true;
+    onUnblock();
   };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-
-    // Parse complete newline-delimited JSON events
-    const lines = buf.split("\n");
-    buf = lines.pop() ?? "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const event = JSON.parse(trimmed) as Record<string, unknown>;
-
-        if (event.type === "system" && (event.subtype === "init" || event.session_id)) {
-          // Capture session ID for new sessions
-          const sid = event.session_id as string | undefined;
-          if (sid && !existing) {
-            await createSession(DEFAULT_SESSION_KEY, sid);
-            console.log(`[${new Date().toLocaleTimeString()}] Session created (stream-json): ${sid}`);
-          }
-        } else if (event.type === "assistant") {
-          // Text and tool_use blocks from the assistant
-          type ContentBlock = { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> };
-          const msg = event.message as { content?: ContentBlock[] } | undefined;
-          const blocks = msg?.content ?? [];
-          let hasActivity = false;
-          for (const block of blocks) {
-            if (block.type === "text" && block.text) {
-              onChunk(block.text);
-              textEmitted = true;
-              hasActivity = true;
-            } else if (block.type === "tool_use") {
-              hasActivity = true;
-            }
-          }
-          if (hasActivity) maybeUnblock();
-        } else if (event.type === "tool_use") {
-          // Top-level tool_use event (some stream-json versions) — unblock the UI
-          maybeUnblock();
-        } else if (event.type === "result") {
-          // Final result event — emit text as fallback if no assistant text was seen
-          const resultText = (event as Record<string, unknown>).result as string | undefined;
-          if (resultText && !textEmitted) {
-            onChunk(resultText);
-          }
-          maybeUnblock();
-        }
-      } catch {}
-    }
-  }
+  await consumeStreamJsonStream(proc.stdout, {
+    onText: (text) => {
+      onChunk(text);
+      textEmitted = true;
+      maybeUnblock();
+    },
+    onToolUse: () => { maybeUnblock(); },
+    onSessionInit: async (sid) => {
+      if (!existing) {
+        await createSession(DEFAULT_SESSION_KEY, sid);
+        console.log(`[${new Date().toLocaleTimeString()}] Session created (stream-json): ${sid}`);
+      }
+    },
+    onResult: (resultText) => {
+      if (!textEmitted) onChunk(resultText);
+      maybeUnblock();
+    },
+  });
 
   await proc.exited;
-  // Ensure unblock fires even if something unexpected happened
   maybeUnblock();
 
   console.log(`[${new Date().toLocaleTimeString()}] Done: ${name}`);

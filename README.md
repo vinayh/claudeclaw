@@ -24,6 +24,7 @@ This is a fork of [moazbuilds/ClaudeClaw](https://github.com/moazbuilds/ClaudeCl
 - **Unit tests and CI:** Added vitest test suite with Zod schema validation, CI workflow with code coverage reporting via Codecov.
 - **Shared paths and constants:** Extracted shared path helpers and `DEFAULT_SESSION_KEY` constant to reduce duplication across modules.
 - **Deployment docs:** Added systemd service template and marketplace-based deploy workflow documentation in `CLAUDE.md`.
+- **Stream-json output for all turns:** All chat turns now invoke `claude -p` with `--output-format stream-json --verbose` instead of the default `text` format. Reason: Claude Code's `text` (and single-object `json`) output only surfaces the *final* text block of a turn. If the model emits a reply and then calls a tool (e.g. a memory update) before ending the turn, the reply is silently dropped and Discord/Telegram users see `(empty response)`. Stream-json lets us accumulate every text block across the turn, so pre-tool text is preserved.
 
 ---
 

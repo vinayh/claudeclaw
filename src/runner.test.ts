@@ -7,6 +7,9 @@ import {
   buildChildEnv,
   getCleanEnv,
   buildSecurityArgs,
+  handleStreamJsonEvent,
+  consumeStreamJsonStream,
+  type StreamJsonHandlers,
 } from "./runner";
 
 describe("extractRateLimitMessage", () => {
@@ -185,5 +188,196 @@ describe("buildSecurityArgs", () => {
     const args = buildSecurityArgs({ level: "moderate", allowedTools: [], disallowedTools: ["Bash"] });
     expect(args).toContain("--disallowedTools");
     expect(args).toContain("Bash");
+  });
+});
+
+describe("handleStreamJsonEvent", () => {
+  function collect() {
+    const text: string[] = [];
+    const toolUses: number[] = [];
+    const sessionIds: string[] = [];
+    const results: string[] = [];
+    const handlers: StreamJsonHandlers = {
+      onText: (t) => { text.push(t); },
+      onToolUse: () => { toolUses.push(toolUses.length); },
+      onSessionInit: (sid) => { sessionIds.push(sid); },
+      onResult: (r) => { results.push(r); },
+    };
+    return { text, toolUses, sessionIds, results, handlers };
+  }
+
+  it("emits text from assistant text blocks", async () => {
+    const c = collect();
+    await handleStreamJsonEvent({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "hello" }, { type: "text", text: " world" }] },
+    }, c.handlers);
+    expect(c.text).toEqual(["hello", " world"]);
+  });
+
+  it("emits tool_use for each tool_use block", async () => {
+    const c = collect();
+    await handleStreamJsonEvent({
+      type: "assistant",
+      message: { content: [{ type: "tool_use" }, { type: "tool_use" }] },
+    }, c.handlers);
+    expect(c.toolUses.length).toBe(2);
+  });
+
+  it("skips empty text blocks", async () => {
+    const c = collect();
+    await handleStreamJsonEvent({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "" }] },
+    }, c.handlers);
+    expect(c.text).toEqual([]);
+  });
+
+  it("captures session_id from system event", async () => {
+    const c = collect();
+    await handleStreamJsonEvent({ type: "system", subtype: "init", session_id: "abc-123" }, c.handlers);
+    expect(c.sessionIds).toEqual(["abc-123"]);
+  });
+
+  it("captures result text from result event", async () => {
+    const c = collect();
+    await handleStreamJsonEvent({ type: "result", result: "final text" }, c.handlers);
+    expect(c.results).toEqual(["final text"]);
+  });
+
+  it("skips empty result text", async () => {
+    const c = collect();
+    await handleStreamJsonEvent({ type: "result", result: "" }, c.handlers);
+    expect(c.results).toEqual([]);
+  });
+
+  it("handles top-level tool_use event", async () => {
+    const c = collect();
+    await handleStreamJsonEvent({ type: "tool_use" }, c.handlers);
+    expect(c.toolUses.length).toBe(1);
+  });
+
+  it("ignores unknown event types", async () => {
+    const c = collect();
+    await handleStreamJsonEvent({ type: "mystery" }, c.handlers);
+    expect(c.text).toEqual([]);
+    expect(c.toolUses).toEqual([]);
+    expect(c.sessionIds).toEqual([]);
+    expect(c.results).toEqual([]);
+  });
+
+  it("ignores non-object events", async () => {
+    const c = collect();
+    await handleStreamJsonEvent(null, c.handlers);
+    await handleStreamJsonEvent("string", c.handlers);
+    await handleStreamJsonEvent(42, c.handlers);
+    expect(c.text).toEqual([]);
+  });
+
+  it("invokes handlers only when provided", async () => {
+    // No throws when handlers are absent.
+    await handleStreamJsonEvent({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "x" }, { type: "tool_use" }] },
+    }, {});
+    await handleStreamJsonEvent({ type: "system", session_id: "x" }, {});
+    await handleStreamJsonEvent({ type: "result", result: "x" }, {});
+  });
+});
+
+function streamFromLines(lines: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const line of lines) controller.enqueue(encoder.encode(line));
+      controller.close();
+    },
+  });
+}
+
+describe("consumeStreamJsonStream", () => {
+  it("reproduces the kalai pattern: text before tool, no text after", async () => {
+    // assistant emits text + tool_use (stop_reason: tool_use), then turn ends.
+    // Old text-format would drop all of this; stream-json captures it.
+    const lines = [
+      `{"type":"system","subtype":"init","session_id":"kalai-sess"}\n`,
+      `{"type":"assistant","message":{"content":[{"type":"text","text":"The inner critic has ammunition."},{"type":"tool_use","name":"Edit"}]}}\n`,
+      `{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}\n`,
+      `{"type":"result","result":""}\n`,
+    ];
+    let collected = "";
+    let sessionId: string | null = null;
+    let toolUses = 0;
+    let fallbackResult = "";
+    await consumeStreamJsonStream(streamFromLines(lines), {
+      onText: (t) => { collected += t; },
+      onToolUse: () => { toolUses++; },
+      onSessionInit: (sid) => { sessionId = sid; },
+      onResult: (r) => { fallbackResult = r; },
+    });
+    expect(collected).toBe("The inner critic has ammunition.");
+    expect(sessionId).toBe("kalai-sess");
+    expect(toolUses).toBe(1);
+    expect(fallbackResult).toBe(""); // empty result event is skipped
+  });
+
+  it("concatenates text across multiple assistant events", async () => {
+    const lines = [
+      `{"type":"assistant","message":{"content":[{"type":"text","text":"Looking now."},{"type":"tool_use"}]}}\n`,
+      `{"type":"assistant","message":{"content":[{"type":"text","text":"Found: hello"}]}}\n`,
+      `{"type":"result","result":"Found: hello"}\n`,
+    ];
+    let collected = "";
+    await consumeStreamJsonStream(streamFromLines(lines), { onText: (t) => { collected += t; } });
+    expect(collected).toBe("Looking now.Found: hello");
+  });
+
+  it("handles chunks split mid-line", async () => {
+    const lines = [
+      `{"type":"assistant","message":{"content":[{"type":"text","text":"hel`,
+      `lo"}]}}\n{"type":"result","result":"hello"}\n`,
+    ];
+    let collected = "";
+    let finalResult = "";
+    await consumeStreamJsonStream(streamFromLines(lines), {
+      onText: (t) => { collected += t; },
+      onResult: (r) => { finalResult = r; },
+    });
+    expect(collected).toBe("hello");
+    expect(finalResult).toBe("hello");
+  });
+
+  it("parses a trailing line without newline", async () => {
+    const lines = [`{"type":"assistant","message":{"content":[{"type":"text","text":"tail"}]}}`];
+    let collected = "";
+    await consumeStreamJsonStream(streamFromLines(lines), { onText: (t) => { collected += t; } });
+    expect(collected).toBe("tail");
+  });
+
+  it("silently skips malformed JSON lines", async () => {
+    const lines = [
+      `not json\n`,
+      `{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}\n`,
+      `{incomplete\n`,
+    ];
+    let collected = "";
+    await consumeStreamJsonStream(streamFromLines(lines), { onText: (t) => { collected += t; } });
+    expect(collected).toBe("ok");
+  });
+
+  it("emits nothing when stream contains only tool_use", async () => {
+    // Preserves the "(empty response)" fallback path in chat-handler.
+    const lines = [
+      `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read"}]}}\n`,
+      `{"type":"result","result":""}\n`,
+    ];
+    let collected = "";
+    let toolUses = 0;
+    await consumeStreamJsonStream(streamFromLines(lines), {
+      onText: (t) => { collected += t; },
+      onToolUse: () => { toolUses++; },
+    });
+    expect(collected).toBe("");
+    expect(toolUses).toBe(1);
   });
 });
