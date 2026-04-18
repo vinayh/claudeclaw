@@ -6,7 +6,6 @@ export const LOGS_DIR = join(HEARTBEAT_DIR, "logs");
 export const JOBS_DIR = join(HEARTBEAT_DIR, "jobs");
 export const SESSIONS_DIR = join(HEARTBEAT_DIR, "sessions");
 export const SETTINGS_FILE = join(HEARTBEAT_DIR, "settings.json");
-export const SESSION_FILE = join(HEARTBEAT_DIR, "session.json");
 export const SESSIONS_FILE = join(HEARTBEAT_DIR, "sessions.json");
 export const STATE_FILE = join(HEARTBEAT_DIR, "state.json");
 export const PID_FILE = join(HEARTBEAT_DIR, "daemon.pid");

@@ -533,7 +533,6 @@ export const pageScript = String.raw`    const $ = (id) => document.getElementBy
       const sections = [
         { title: "daemon", value: data?.daemon ?? null },
         { title: "settings.json", value: data?.files?.settingsJson ?? null },
-        { title: "session.json", value: data?.files?.sessionJson ?? null },
         { title: "state.json", value: data?.files?.stateJson ?? null },
       ];
       infoBody.innerHTML = sections.map((section) =>

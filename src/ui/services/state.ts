@@ -1,6 +1,6 @@
 import { readFile } from "fs/promises";
 import { peekDefaultSession } from "../../sessionManager";
-import { SESSION_FILE, SETTINGS_FILE, STATE_FILE } from "../constants";
+import { SETTINGS_FILE, STATE_FILE } from "../constants";
 import type { WebSnapshot } from "../types";
 
 export function sanitizeSettings(snapshot: WebSnapshot["settings"]) {
@@ -71,7 +71,6 @@ export async function buildTechnicalInfo(snapshot: WebSnapshot) {
     },
     files: {
       settingsJson: await readJsonFile(SETTINGS_FILE),
-      sessionJson: await readJsonFile(SESSION_FILE),
       stateJson: await readJsonFile(STATE_FILE),
     },
     snapshot,

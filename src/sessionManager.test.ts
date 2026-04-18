@@ -10,7 +10,6 @@ const tempDir = await mkdtemp(join(tmpdir(), "claudeclaw-sm-test-"));
 mock.module("./paths", () => ({
   HEARTBEAT_DIR: tempDir,
   SESSIONS_FILE: join(tempDir, "sessions.json"),
-  SESSION_FILE: join(tempDir, "session.json"),
 }));
 
 import {
@@ -216,17 +215,7 @@ describe("sessionManager", () => {
       expect(await peekDefaultSession()).toBeNull();
     });
 
-    it("cleans up legacy session.json if present", async () => {
-      await createSession(DEFAULT_SESSION_KEY, "uuid-default");
-      await writeFile(join(tempDir, "session.json"), "{}");
-
-      await resetDefaultSession();
-
-      const files = await readdir(tempDir);
-      expect(files).not.toContain("session.json");
-    });
-
-    it("does not throw when no default session or legacy file exists", async () => {
+    it("does not throw when no default session exists", async () => {
       await resetDefaultSession(); // should not throw
     });
   });
@@ -260,24 +249,6 @@ describe("sessionManager", () => {
       const backupName = await backupDefaultSession();
 
       expect(backupName).toBe("session_4.backup");
-    });
-
-    it("backup content matches session data even when legacy file exists", async () => {
-      await createSession(DEFAULT_SESSION_KEY, "uuid-real-session");
-      // Simulate a legacy session.json with different content
-      await writeFile(join(tempDir, "session.json"), JSON.stringify({ old: "legacy-data" }));
-
-      const backupName = await backupDefaultSession();
-      expect(backupName).toBe("session_1.backup");
-
-      const backupContent = JSON.parse(await readFile(join(tempDir, backupName!), "utf-8"));
-      // Backup must contain the real session data, not the legacy file content
-      expect(backupContent.sessionId).toBe("uuid-real-session");
-      expect(backupContent).not.toHaveProperty("old");
-
-      // Legacy file should be cleaned up
-      const files = await readdir(tempDir);
-      expect(files).not.toContain("session.json");
     });
 
     it("does not affect other sessions", async () => {

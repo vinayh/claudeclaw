@@ -1,5 +1,5 @@
 import { join } from "path";
-import { unlink, readdir } from "fs/promises";
+import { readdir } from "fs/promises";
 import { existsSync } from "fs";
 import * as paths from "./paths";
 
@@ -47,8 +47,16 @@ async function loadSessions(): Promise<SessionsData> {
 }
 
 async function saveSessions(data: SessionsData): Promise<void> {
-  await Bun.write(paths.SESSIONS_FILE, JSON.stringify(data, null, 2) + "\n");
-  sessionsCache = data;
+  try {
+    await Bun.write(paths.SESSIONS_FILE, JSON.stringify(data, null, 2) + "\n");
+    sessionsCache = data;
+  } catch (err) {
+    // Callers mutate the cached object in-place before calling saveSessions,
+    // so a write failure leaves cache diverged from disk. Drop the cache so
+    // the next read re-parses disk (the source of truth).
+    sessionsCache = null;
+    throw err;
+  }
 }
 
 /** Get session by key. Returns null if no session exists yet. */
@@ -141,8 +149,6 @@ export async function peekDefaultSession(): Promise<Session | null> {
 /** Remove the default session entry (equivalent to legacy resetSession). */
 export async function resetDefaultSession(): Promise<void> {
   await removeSession(DEFAULT_SESSION_KEY);
-  // Also clean up the legacy session.json if it exists
-  try { await unlink(paths.SESSION_FILE); } catch { /* already gone */ }
 }
 
 /** Back up the default session to a numbered .backup file and remove the active entry. */
@@ -170,9 +176,6 @@ export async function backupDefaultSession(): Promise<string | null> {
 
   // Remove from active sessions
   await removeSession(DEFAULT_SESSION_KEY);
-
-  // Also clean up legacy session.json if it exists
-  try { await unlink(paths.SESSION_FILE); } catch { /* already gone */ }
 
   return backupName;
 }

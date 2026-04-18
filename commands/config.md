@@ -205,14 +205,19 @@ Configure web UI bind address or port.
 Reset all settings to defaults.
 
 1. Use **AskUserQuestion**: "Reset all settings to defaults? This will disable heartbeat and clear Telegram config." (header: "Confirm", options: "Yes, reset everything", "No, keep current settings")
-2. If confirmed, write the default settings:
+2. If confirmed, write the default settings. These MUST match `DEFAULT_SETTINGS` in `src/config.ts` — anything missing here will be wiped from the user's current config (including `discord` tokens, `agentic` routing modes, and `stt` config):
    ```json
    {
      "model": "",
      "api": "",
-     "fallback": {
-       "model": "",
-       "api": ""
+     "fallback": { "model": "", "api": "" },
+     "agentic": {
+       "enabled": false,
+       "defaultMode": "implementation",
+       "modes": [
+         { "name": "planning", "model": "opus", "keywords": [], "phrases": [] },
+         { "name": "implementation", "model": "sonnet", "keywords": [] }
+       ]
      },
      "timezone": "UTC",
      "timezoneOffsetMinutes": 0,
@@ -223,23 +228,16 @@ Reset all settings to defaults.
        "excludeWindows": [],
        "forwardToTelegram": true
      },
-     "telegram": {
-       "token": "",
-       "allowedUserIds": []
-     },
-     "security": {
-       "level": "moderate",
-       "allowedTools": [],
-       "disallowedTools": []
-     },
-     "web": {
-       "enabled": false,
-       "host": "127.0.0.1",
-       "port": 4632
-     }
+     "telegram": { "token": "", "allowedUserIds": [] },
+     "discord": { "token": "", "allowedUserIds": [], "listenChannels": [] },
+     "security": { "level": "moderate", "allowedTools": [], "disallowedTools": [] },
+     "web": { "enabled": false, "host": "127.0.0.1", "port": 4632 },
+     "stt": { "baseUrl": "", "model": "" },
+     "sessionTimeoutMs": 300000
    }
    ```
-3. Confirm the reset. Note: this does not delete cron jobs — use `/heartbeat:jobs delete` for that.
+   Simpler alternative: delete `.claude/claudeclaw/settings.json` and restart the daemon — `initConfig()` regenerates defaults from the source of truth in `src/config.ts`, so the reset can't drift.
+3. Confirm the reset. Note: this does not delete cron jobs — use `/claudeclaw:jobs delete` for that.
 
 ---
 

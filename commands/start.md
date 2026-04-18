@@ -215,7 +215,7 @@ Start the heartbeat daemon for this project. Follow these steps exactly:
      - macOS: `open http://<HOST>:<PORT>`
      - If open command fails, print the URL clearly so user can open it manually.
 
-7. **Capture session ID**: Read `.claude/claudeclaw/session.json` and extract the `sessionId` field. This is the global session used by the daemon for heartbeat, jobs, Telegram, and Discord `listenChannels`. Other Discord channels and threads each get their own dedicated session automatically.
+7. **Capture session ID**: Read `.claude/claudeclaw/sessions.json` and extract `sessions.default.sessionId`. This is the default session used by the daemon for heartbeat, jobs, Telegram, and Discord `listenChannels`. Other Discord channels and threads each get their own dedicated session keyed by channel/thread ID in the same map.
 
 8. **Report**: Print the ASCII art below then show the PID, session, status info, Telegram bot next step, and the Web UI URL.
 
@@ -232,10 +232,10 @@ CRITICAL: Output the ASCII art block below EXACTLY as-is inside a markdown code 
 **Daemon is running! PID: \<PID> | Dir: \<WORKING_DIR>**
 
 ```
-/heartbeat:status  - check status
-/heartbeat:stop    - stop daemon
-/heartbeat:clear   - back up session & restart fresh
-/heartbeat:config  - show config
+/claudeclaw:status  - check status
+/claudeclaw:stop    - stop daemon
+/claudeclaw:clear   - back up session & restart fresh
+/claudeclaw:config  - show config
 ```
 
 **To start chatting on Telegram**

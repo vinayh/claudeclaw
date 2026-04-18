@@ -326,8 +326,8 @@ export function parseSettings(raw: unknown, discordIds?: DiscordSnowflakes): Set
   };
 }
 
-export async function loadSettings(): Promise<Settings> {
-  if (cached) return cached;
+export async function loadSettings({ force = false }: { force?: boolean } = {}): Promise<Settings> {
+  if (!force && cached) return cached;
   const rawText = await Bun.file(SETTINGS_FILE).text();
   let raw: unknown;
   try {
@@ -345,19 +345,7 @@ export async function loadSettings(): Promise<Settings> {
 
 /** Re-read settings from disk, bypassing cache. */
 export async function reloadSettings(): Promise<Settings> {
-  const rawText = await Bun.file(SETTINGS_FILE).text();
-  let raw: unknown;
-  try {
-    raw = JSON.parse(rawText);
-  } catch (err) {
-    console.error(`[Config] Failed to parse settings.json, using defaults:`, err);
-    raw = {};
-  }
-  cached = parseSettings(raw, {
-    allowedUserIds: extractSnowflakeArray(rawText, "allowedUserIds"),
-    listenChannels: extractSnowflakeArray(rawText, "listenChannels"),
-  });
-  return cached;
+  return loadSettings({ force: true });
 }
 
 export function getSettings(): Settings {
