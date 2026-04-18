@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.1.1...claudeclaw-v1.1.2) (2026-04-18)
+
+
+### Bug Fixes
+
+* align slash commands with /claudeclaw: namespace and harden session cache ([e93ac57](https://github.com/vinayh/claudeclaw/commit/e93ac5783da88cd18dcaaa15149e5ed0b2193681))
+
 ## [1.1.1](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.1.0...claudeclaw-v1.1.1) (2026-04-17)
 
 
