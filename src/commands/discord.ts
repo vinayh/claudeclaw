@@ -170,7 +170,7 @@ Rules:
 
 // --- Guild trigger logic ---
 
-function guildTriggerReason(message: Message): string | null {
+function guildTriggerReason(message: Message): string {
   const botId = client?.user?.id;
   if (botId && message.reference?.messageId) {
     // Check if replying to the bot
@@ -187,7 +187,9 @@ function guildTriggerReason(message: Message): string | null {
     if (config.listenChannels.includes(message.channel.parentId)) return "listen_channel_thread";
   }
 
-  return null;
+  // Catch-all: respond to any other guild message (isolated per-channel session).
+  // Authorization still gates who actually gets processed.
+  return "guild_message";
 }
 
 // --- Message handler ---
@@ -203,10 +205,7 @@ async function handleMessageCreate(message: Message): Promise<void> {
   const isGuild = !!message.guild;
   const content = message.content;
 
-  // Guild trigger check
   const triggerReason = isGuild ? guildTriggerReason(message) : "direct_message";
-  if (isGuild && !triggerReason) return;
-
   debugLog(`Handle message channel=${channelId} from=${userId} reason=${triggerReason} text="${content.slice(0, 80)}"`);
 
   // Detect attachments
@@ -443,13 +442,81 @@ async function registerSlashCommands(): Promise<void> {
 
 // --- Client lifecycle ---
 
+// Valid Discord snowflake: 17-20 digit numeric string.
+const SNOWFLAKE_RE = /^\d{17,20}$/;
+
+/**
+ * Pre-cache DM channels for every allowed user.
+ *
+ * discord.js's MESSAGE_CREATE action calls the channel resolver with only
+ * `{id, author, guild_id?}`. For DMs the payload carries no `type` or
+ * `recipients`, so even with `Partials.Channel` the resolver cannot figure
+ * out it's a DM and returns null — dropping the event silently. Calling
+ * `user.createDM()` puts a real DMChannel in `client.channels.cache`, so
+ * subsequent `MESSAGE_CREATE` events resolve and dispatch normally.
+ */
+async function primeDMChannels(): Promise<void> {
+  if (!client) return;
+  const { allowedUserIds } = getSettings().discord;
+  for (const userId of allowedUserIds) {
+    try {
+      const user = await client.users.fetch(userId);
+      await user.createDM();
+      debugLog(`Primed DM channel for ${user.username} (${userId})`);
+    } catch (err) {
+      console.error(`[Discord] Failed to prime DM for user ${userId}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+}
+
+/**
+ * Re-add the bot as a thread member for every persisted thread session.
+ *
+ * discord.js keeps guild-channel membership automatically, but if a thread
+ * was archived (or the bot restarted while it was), Discord stops delivering
+ * MESSAGE_CREATE events until the bot re-joins. Without this, sessions keyed
+ * by thread ID go silent after any restart.
+ *
+ * Non-thread sessions (guild channels, DM IDs, "default") are skipped.
+ */
+async function rejoinThreads(): Promise<void> {
+  if (!client) return;
+  const sessions = await listSessions();
+  let rejoined = 0;
+  for (const sess of sessions) {
+    if (!SNOWFLAKE_RE.test(sess.key)) continue; // skip "default" and anything non-snowflake
+    try {
+      const channel = await client.channels.fetch(sess.key).catch(() => null);
+      if (!channel || !channel.isThread()) continue;
+      const thread = channel as ThreadChannel;
+      if (thread.archived) {
+        try { await thread.setArchived(false); } catch { /* no perms — leave archived */ }
+      }
+      await thread.join();
+      rejoined += 1;
+      debugLog(`Rejoined thread ${thread.id} (${thread.name})`);
+    } catch (err) {
+      console.error(`[Discord] Failed to rejoin thread ${sess.key}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  if (rejoined > 0) {
+    console.log(`[Discord] Rejoined ${rejoined} thread session(s) from sessions.json`);
+  }
+}
+
 function setupEventHandlers(): void {
   if (!client) return;
 
-  client.on("ready", () => {
+  client.on("clientReady", () => {
     console.log(`[Discord] Ready as ${client!.user?.username} (${client!.user?.id})`);
     registerSlashCommands().catch((err) =>
       console.error(`[Discord] Failed to register slash commands: ${err}`),
+    );
+    rejoinThreads().catch((err) =>
+      console.error(`[Discord] rejoinThreads failed: ${err}`),
+    );
+    primeDMChannels().catch((err) =>
+      console.error(`[Discord] primeDMChannels failed: ${err}`),
     );
   });
 
@@ -545,9 +612,14 @@ export function startGateway(debug = false): void {
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.GuildMessageReactions,
       GatewayIntentBits.DirectMessages,
+      GatewayIntentBits.DirectMessageReactions,
       GatewayIntentBits.MessageContent,
     ],
-    partials: [Partials.Channel], // Required for DM support
+    // Partials.Channel allows uncached channels to flow through event
+    // dispatch. Note: it is NOT sufficient on its own for DMs — see
+    // primeDMChannels() for why we also pre-cache DM channels at ready.
+    // Message/User are for reaction handling on uncached messages.
+    partials: [Partials.Channel, Partials.Message, Partials.User],
   });
 
   setupEventHandlers();
