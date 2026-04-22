@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.3](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.1.2...claudeclaw-v1.1.3) (2026-04-22)
+
+
+### Bug Fixes
+
+* restore DM delivery and non-listen guild channels after discord.js migration ([ad890b4](https://github.com/vinayh/claudeclaw/commit/ad890b4f027a6687eceff71db9782050d3a00b2f))
+
 ## [1.1.2](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.1.1...claudeclaw-v1.1.2) (2026-04-18)
 
 
