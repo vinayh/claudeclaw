@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.2.0...claudeclaw-v1.3.0) (2026-04-28)
+
+
+### Features
+
+* replay-driven cron scheduler, atomic state writes ([04929d7](https://github.com/vinayh/claudeclaw/commit/04929d781da8d6e7d425e78417e02afb412c4cd5))
+* **scheduler:** wall-clock-aligned ticks with missed-fire replay ([04929d7](https://github.com/vinayh/claudeclaw/commit/04929d781da8d6e7d425e78417e02afb412c4cd5))
+
+
+### Bug Fixes
+
+* atomic state-file writes via temp + fsync + rename ([04929d7](https://github.com/vinayh/claudeclaw/commit/04929d781da8d6e7d425e78417e02afb412c4cd5))
+
 ## [1.2.0](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.1.3...claudeclaw-v1.2.0) (2026-04-28)
 
 
