@@ -17,14 +17,27 @@
 
 This is a fork of [moazbuilds/ClaudeClaw](https://github.com/moazbuilds/ClaudeClaw) with the following changes:
 
-- **Per-channel session isolation (Discord):** Each guild channel gets its own isolated Claude CLI session with independent working directory and memory, so conversations in different channels don't interfere with each other.
+**Architecture**
+- **Discord migrated to discord.js:** Replaced the hand-rolled Discord Gateway/REST client with [discord.js](https://discord.js.org/). Eliminates a class of thread-membership and reconnect bugs (Discord's intent-driven gateway is complex enough that a maintained library is the right call) and unlocks first-class typed access to attachments, threads, and slash commands.
+- **Chat platform abstraction:** Discord and Telegram now share a common `ChatHandler` / `ChatUtils` layer for message routing, attachment download, transcription, and forwarding. Removes the duplicated boilerplate that previously lived in each command file.
+- **Per-channel session isolation (Discord):** Each guild channel gets its own isolated Claude CLI session with independent working directory and memory, so conversations in different channels don't interfere with each other. Each Discord thread also gets its own isolated session.
 - **Consolidated session management:** Unified session handling around a single `SessionManager` with consistent naming (`session` = Claude conversation, `thread` = Discord thread only). Replaced the legacy global session file with a keyed session map persisted to `sessions.json`.
-- **Environment variable tokens:** Discord and Telegram tokens can now be set via environment variables instead of `settings.json`, keeping secrets out of config files.
-- **Statusline fix:** Fixed box border rendering that broke when content width changed dynamically.
+- **Stream-json output for all turns:** All chat turns invoke `claude -p` with `--output-format stream-json --verbose` instead of the default `text` format. Reason: Claude Code's `text` (and single-object `json`) output only surfaces the *final* text block of a turn. If the model emits a reply and then calls a tool (e.g. a memory update) before ending the turn, the reply is silently dropped and Discord/Telegram users see `(empty response)`. Stream-json lets us accumulate every text block across the turn, so pre-tool text is preserved. Related upstream issue: [anthropics/claude-code#36632](https://github.com/anthropics/claude-code/issues/36632).
+
+**Features**
+- **Per-job model override:** Job frontmatter accepts an optional `model:` field (e.g. `model: haiku`) to route individual cron jobs to a specific model. Useful for keeping cheap recurring tasks (digests, monitoring) off your default model. Takes precedence over agentic routing when set.
+- **Environment variable tokens:** Discord and Telegram tokens can be set via `DISCORD_TOKEN` / `TELEGRAM_TOKEN` environment variables instead of `settings.json`, keeping secrets out of config files (compatible with `op run` and similar secret managers).
+
+**Fixes**
+- **Strip parent OAuth + host-managed env from spawned `claude`:** When ClaudeClaw is launched from inside Claude Code or Claude Desktop, the daemon inherits `CLAUDE_CODE_OAUTH_TOKEN` (a frozen ~8h access token) and `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`. Both leaked into every spawned `claude` subprocess; once the inherited token expired, every spawn returned HTTP 401 silently. Stripping all three env vars (including `CLAUDECODE`) lets the CLI fall back to the platform credential store on each invocation.
+- **Heartbeat sentinel under stream-json:** Heartbeats no longer forward `HEARTBEAT_OK` to chat platforms. Stream-json concatenates pre-tool narration in front of the sentinel, so the suppression check now matches the trimmed reply's *end* rather than its start.
+- **Statusline rendering:** Fixed box border alignment that broke when content width changed dynamically.
+
+**Infrastructure**
+- **Auto-versioning via release-please:** Conventional Commit subjects on `main` automatically open/update a release PR; merging it bumps `.claude-plugin/plugin.json` and publishes a new marketplace version. See `CLAUDE.md` for the deploy workflow.
 - **Unit tests and CI:** Added vitest test suite with Zod schema validation, CI workflow with code coverage reporting via Codecov.
 - **Shared paths and constants:** Extracted shared path helpers and `DEFAULT_SESSION_KEY` constant to reduce duplication across modules.
 - **Deployment docs:** Added systemd service template and marketplace-based deploy workflow documentation in `CLAUDE.md`.
-- **Stream-json output for all turns:** All chat turns now invoke `claude -p` with `--output-format stream-json --verbose` instead of the default `text` format. Reason: Claude Code's `text` (and single-object `json`) output only surfaces the *final* text block of a turn. If the model emits a reply and then calls a tool (e.g. a memory update) before ending the turn, the reply is silently dropped and Discord/Telegram users see `(empty response)`. Stream-json lets us accumulate every text block across the turn, so pre-tool text is preserved. Related upstream issue: [anthropics/claude-code#36632](https://github.com/anthropics/claude-code/issues/36632).
 
 ---
 
