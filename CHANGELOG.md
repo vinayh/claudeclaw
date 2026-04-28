@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.1.3...claudeclaw-v1.2.0) (2026-04-28)
+
+
+### Features
+
+* **jobs:** per-job `model:` frontmatter override ([7d3c176](https://github.com/vinayh/claudeclaw/commit/7d3c176c15b8161ca1cbf90abc3f7cd1be54384f))
+* per-job model override, OAuth env strip, and heartbeat sentinel fix ([7d3c176](https://github.com/vinayh/claudeclaw/commit/7d3c176c15b8161ca1cbf90abc3f7cd1be54384f))
+
+
+### Bug Fixes
+
+* **heartbeat:** match HEARTBEAT_OK with endsWith under stream-json ([7d3c176](https://github.com/vinayh/claudeclaw/commit/7d3c176c15b8161ca1cbf90abc3f7cd1be54384f))
+* **runner:** strip parent OAuth + host-managed env from spawned claude ([7d3c176](https://github.com/vinayh/claudeclaw/commit/7d3c176c15b8161ca1cbf90abc3f7cd1be54384f))
+
 ## [1.1.3](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.1.2...claudeclaw-v1.1.3) (2026-04-22)
 
 
