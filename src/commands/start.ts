@@ -2,13 +2,16 @@ import { writeFile, unlink, mkdir } from "fs/promises";
 import { fileURLToPath } from "url";
 import { run, runUserMessage, streamUserMessage, bootstrap, ensureProjectClaudeMd, loadHeartbeatPromptTemplate } from "../runner";
 import { writeState, type StateData } from "../statusline";
-import { cronMatches, nextCronMatch } from "../cron";
+import { nextCronMatch } from "../cron";
+import { computeMissedFires, msUntilNextMinute } from "../replay";
+import { getLastFired, setLastFired, forgetJob } from "../jobsState";
 import { clearJobSchedule, loadJobs } from "../jobs";
 import { writePidFile, cleanupPidFile, checkExistingDaemon } from "../pid";
 import { initConfig, loadSettings, reloadSettings, resolvePrompt, type HeartbeatConfig, type Settings } from "../config";
 import { getDayAndMinuteAtOffset } from "../timezone";
 import { startWebUi, type WebServerHandle } from "../web";
 import { CLAUDE_DIR, HEARTBEAT_DIR, STATUSLINE_FILE, CLAUDE_SETTINGS_FILE } from "../paths";
+import { atomicWriteFile } from "../atomic-write";
 import type { Job } from "../jobs";
 
 const PREFLIGHT_SCRIPT = fileURLToPath(new URL("../preflight.ts", import.meta.url));
@@ -182,14 +185,14 @@ async function setupStatusline() {
     type: "command",
     command: "node .claude/statusline.cjs",
   };
-  await writeFile(CLAUDE_SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
+  await atomicWriteFile(CLAUDE_SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
 }
 
 async function teardownStatusline() {
   try {
     const settings = await Bun.file(CLAUDE_SETTINGS_FILE).json();
     delete settings.statusLine;
-    await writeFile(CLAUDE_SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
+    await atomicWriteFile(CLAUDE_SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
   } catch {
     // file doesn't exist, nothing to clean up
   }
@@ -684,6 +687,15 @@ export async function start(args: string[] = []) {
         console.log(`[${ts()}] Jobs reloaded: ${newJobs.length} job(s)`);
         newJobs.forEach((j) => console.log(`    - ${j.name} [${j.schedule}]`));
       }
+      // Drop persisted state for jobs that were removed from disk.
+      const newNameSet = new Set(newJobs.map((j) => j.name));
+      for (const old of currentJobs) {
+        if (!newNameSet.has(old.name)) {
+          forgetJob(old.name).catch((err) =>
+            console.error(`[${ts()}] Failed to forget job state for ${old.name}:`, err)
+          );
+        }
+      }
       currentJobs = newJobs;
 
       // Telegram changes
@@ -722,28 +734,76 @@ export async function start(args: string[] = []) {
 
   updateState();
 
-  setInterval(() => {
+  // --- Cron tick (replay-driven, wall-clock aligned) ---
+  // For each job we walk forward from the last persisted fire time, firing
+  // every match in (lastFiredAt, now]. Catches up missed fires across daemon
+  // restarts and prevents same-minute double fires when the event loop slips.
+  // Per-tick replays are capped to bound catch-up after long downtime.
+  const MAX_REPLAY_PER_JOB = 10;
+
+  function fireJob(job: Job) {
+    resolvePrompt(job.prompt)
+      .then((prompt) => run(job.name, prompt, undefined, job.model))
+      .then((r) => {
+        if (job.notify === false) return;
+        if (job.notify === "error" && r.exitCode === 0) return;
+        forwardToAll(job.name, r);
+      })
+      .finally(async () => {
+        if (job.recurring) return;
+        try {
+          await clearJobSchedule(job.name);
+          console.log(`[${ts()}] Cleared schedule for one-time job: ${job.name}`);
+        } catch (err) {
+          console.error(`[${ts()}] Failed to clear schedule for ${job.name}:`, err);
+        }
+      });
+  }
+
+  async function cursorFor(job: Job, now: Date): Promise<Date> {
+    const seen = await getLastFired(job.name);
+    if (seen) return seen;
+    // First sighting: anchor the cursor to `now` so we don't replay matches
+    // that pre-date the job's existence in this daemon's lifetime.
+    await setLastFired(job.name, now);
+    return now;
+  }
+
+  async function runCronTick() {
     const now = new Date();
+    const tz = currentSettings.timezoneOffsetMinutes;
     for (const job of currentJobs) {
-      if (cronMatches(job.schedule, now, currentSettings.timezoneOffsetMinutes)) {
-        resolvePrompt(job.prompt)
-          .then((prompt) => run(job.name, prompt, undefined, job.model))
-          .then((r) => {
-            if (job.notify === false) return;
-            if (job.notify === "error" && r.exitCode === 0) return;
-            forwardToAll(job.name, r);
-          })
-          .finally(async () => {
-            if (job.recurring) return;
-            try {
-              await clearJobSchedule(job.name);
-              console.log(`[${ts()}] Cleared schedule for one-time job: ${job.name}`);
-            } catch (err) {
-              console.error(`[${ts()}] Failed to clear schedule for ${job.name}:`, err);
-            }
-          });
+      try {
+        const cursor = await cursorFor(job, now);
+        const replay = computeMissedFires(job.schedule, cursor, now, tz, MAX_REPLAY_PER_JOB);
+        if (replay.skipped > 0) {
+          console.log(`[${ts()}] Coalesced ${replay.skipped} missed fire(s) for ${job.name} → firing once at ${replay.fires[0]?.toISOString()}`);
+        }
+        for (const fireAt of replay.fires) {
+          // Persist the cursor BEFORE enqueueing so a crash mid-fire is at-most-once.
+          await setLastFired(job.name, fireAt);
+          fireJob(job);
+        }
+      } catch (err) {
+        console.error(`[${ts()}] Cron tick error for ${job.name}:`, err);
       }
     }
     updateState();
-  }, 60_000);
+  }
+
+  function scheduleNextCronTick() {
+    setTimeout(async () => {
+      try {
+        await runCronTick();
+      } catch (err) {
+        console.error(`[${ts()}] Cron tick failed:`, err);
+      } finally {
+        scheduleNextCronTick();
+      }
+    }, msUntilNextMinute());
+  }
+
+  // Catch-up pass: replays anything missed while the daemon was stopped.
+  await runCronTick();
+  scheduleNextCronTick();
 }

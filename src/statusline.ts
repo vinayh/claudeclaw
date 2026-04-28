@@ -1,4 +1,5 @@
 import { STATE_FILE } from "./paths";
+import { atomicWriteFile } from "./atomic-write";
 
 // Write state.json so the statusline script can read fresh data
 export interface StateData {
@@ -12,5 +13,5 @@ export interface StateData {
 }
 
 export async function writeState(state: StateData) {
-  await Bun.write(STATE_FILE, JSON.stringify(state) + "\n");
+  await atomicWriteFile(STATE_FILE, JSON.stringify(state) + "\n");
 }

@@ -9,11 +9,14 @@ import { describe, it } from "bun:test";
 
 // Core modules
 import "./paths";
+import "./atomic-write";
 import "./config";
 import "./cron";
 import "./jobs";
+import "./jobsState";
 import "./model-router";
 import "./pid";
+import "./replay";
 import "./sessionManager";
 import "./statusline";
 import "./timezone";

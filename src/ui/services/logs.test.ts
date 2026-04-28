@@ -1,5 +1,20 @@
-import { describe, it, expect } from "bun:test";
-import { tailLines } from "./logs";
+import { describe, it, expect, beforeEach, afterAll, mock } from "bun:test";
+import { mkdtemp, rm, writeFile, readdir } from "fs/promises";
+import { join } from "path";
+import { tmpdir } from "os";
+
+const tempDir = await mkdtemp(join(tmpdir(), "claudeclaw-logs-test-"));
+
+mock.module("../constants", () => ({
+  LOGS_DIR: tempDir,
+}));
+
+import { tailLines, readLogs } from "./logs";
+
+async function cleanTempDir() {
+  const files = await readdir(tempDir);
+  await Promise.all(files.map((f) => rm(join(tempDir, f), { force: true })));
+}
 
 describe("tailLines", () => {
   it("returns last N lines", () => {
@@ -28,5 +43,42 @@ describe("tailLines", () => {
 
   it("returns last 1 line", () => {
     expect(tailLines("a\nb\nc", 1)).toEqual(["c"]);
+  });
+});
+
+describe("readLogs", () => {
+  beforeEach(cleanTempDir);
+  afterAll(() => rm(tempDir, { recursive: true, force: true }));
+
+  it("returns empty results when logs dir is empty", async () => {
+    const result = await readLogs(10);
+    expect(result.daemonLog).toEqual([]);
+    expect(result.runs).toEqual([]);
+  });
+
+  it("returns the tail of daemon.log", async () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
+    await writeFile(join(tempDir, "daemon.log"), lines, "utf-8");
+    const result = await readLogs(5);
+    expect(result.daemonLog).toEqual(["line 25", "line 26", "line 27", "line 28", "line 29"]);
+  });
+
+  it("includes recent run logs but excludes daemon.log from runs", async () => {
+    await writeFile(join(tempDir, "daemon.log"), "daemon body\n", "utf-8");
+    await writeFile(join(tempDir, "heartbeat-1.log"), "hb body line", "utf-8");
+    await writeFile(join(tempDir, "git-summary-1.log"), "gs body line", "utf-8");
+    const result = await readLogs(5);
+    expect(result.runs.length).toBe(2);
+    const names = result.runs.map((r) => r.file).sort();
+    expect(names).toEqual(["git-summary-1.log", "heartbeat-1.log"]);
+    expect(names).not.toContain("daemon.log");
+  });
+
+  it("caps run logs at 5 most recent", async () => {
+    for (let i = 0; i < 8; i++) {
+      await writeFile(join(tempDir, `job-${i}.log`), `body ${i}`, "utf-8");
+    }
+    const result = await readLogs(5);
+    expect(result.runs.length).toBe(5);
   });
 });

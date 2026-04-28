@@ -1,6 +1,7 @@
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir } from "fs/promises";
 import { join } from "path";
 import { JOBS_DIR } from "../constants";
+import { atomicWriteFile } from "../../atomic-write";
 
 export interface QuickJobInput {
   time?: unknown;
@@ -39,7 +40,7 @@ export async function createQuickJob(input: QuickJobInput): Promise<{ name: stri
   const content = `---\nschedule: "${schedule}"\nrecurring: ${recurring ? "true" : "false"}\n---\n${prompt}\n`;
 
   await mkdir(JOBS_DIR, { recursive: true });
-  await writeFile(path, content, "utf-8");
+  await atomicWriteFile(path, content);
   return { name, schedule, recurring };
 }
 

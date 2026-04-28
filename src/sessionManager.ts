@@ -2,6 +2,7 @@ import { join } from "path";
 import { readdir } from "fs/promises";
 import { existsSync } from "fs";
 import * as paths from "./paths";
+import { atomicWriteFile } from "./atomic-write";
 
 /** Key for the shared session used by heartbeat, cron, telegram, web UI, etc. */
 export const DEFAULT_SESSION_KEY = "default";
@@ -48,7 +49,7 @@ async function loadSessions(): Promise<SessionsData> {
 
 async function saveSessions(data: SessionsData): Promise<void> {
   try {
-    await Bun.write(paths.SESSIONS_FILE, JSON.stringify(data, null, 2) + "\n");
+    await atomicWriteFile(paths.SESSIONS_FILE, JSON.stringify(data, null, 2) + "\n");
     sessionsCache = data;
   } catch (err) {
     // Callers mutate the cached object in-place before calling saveSessions,
@@ -172,7 +173,7 @@ export async function backupDefaultSession(): Promise<string | null> {
   const backupPath = join(paths.HEARTBEAT_DIR, backupName);
 
   // Write session data as the backup file
-  await Bun.write(backupPath, JSON.stringify(session, null, 2) + "\n");
+  await atomicWriteFile(backupPath, JSON.stringify(session, null, 2) + "\n");
 
   // Remove from active sessions
   await removeSession(DEFAULT_SESSION_KEY);

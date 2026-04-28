@@ -1,5 +1,6 @@
-import { readFile, writeFile } from "fs/promises";
+import { readFile } from "fs/promises";
 import { SETTINGS_FILE } from "../constants";
+import { atomicWriteFile } from "../../atomic-write";
 
 export async function setHeartbeatEnabled(enabled: boolean): Promise<void> {
   await updateHeartbeatSettings({ enabled });
@@ -50,7 +51,7 @@ export async function updateHeartbeatSettings(patch: HeartbeatSettingsPatch): Pr
     data.heartbeat.excludeWindows = patch.excludeWindows;
   }
 
-  await writeFile(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
+  await atomicWriteFile(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
   return {
     enabled: Boolean(data.heartbeat.enabled),
     interval: Number(data.heartbeat.interval) || 15,

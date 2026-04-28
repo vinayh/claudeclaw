@@ -114,4 +114,6 @@ Legacy compatibility: `daily` is still accepted in existing job files.
 | `0 */6 * * *`    | Every 6 hours            |
 | `0 9,18 * * *`   | At 9 AM and 6 PM        |
 
-The daemon checks cron expressions every 60 seconds and hot-reloads job files every 30 seconds.
+The daemon checks cron expressions every 60 seconds (aligned to wall-clock minute boundaries) and hot-reloads job files every 30 seconds.
+
+**Missed fires across daemon downtime:** Each job's last fire time is persisted to `.claude/claudeclaw/jobs-state.json`. When the daemon starts (or every tick), it walks each job forward from its recorded last fire and replays any matches that fell in the gap. If many fires were missed (e.g. after a long outage), they are coalesced — the job fires once and the count of skipped fires is logged. New jobs do not back-fill: their cursor is anchored to the moment the daemon first sees them.

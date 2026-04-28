@@ -1,6 +1,7 @@
 import { readdir } from "fs/promises";
 import { join } from "path";
 import { JOBS_DIR } from "./paths";
+import { atomicWriteFile } from "./atomic-write";
 
 export interface Job {
   name: string;
@@ -97,5 +98,5 @@ export async function clearJobSchedule(jobName: string): Promise<void> {
   const path = join(JOBS_DIR, `${jobName}.md`);
   const content = await Bun.file(path).text();
   const result = stripScheduleFromContent(content);
-  if (result) await Bun.write(path, result);
+  if (result) await atomicWriteFile(path, result);
 }

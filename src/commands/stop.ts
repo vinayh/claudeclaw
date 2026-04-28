@@ -1,14 +1,15 @@
-import { writeFile, unlink, readdir, readFile } from "fs/promises";
+import { unlink, readdir, readFile } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
 import { getPidPath, cleanupPidFile } from "../pid";
 import { HEARTBEAT_DIR, STATUSLINE_FILE, CLAUDE_SETTINGS_FILE } from "../paths";
+import { atomicWriteFile } from "../atomic-write";
 
 async function teardownStatusline() {
   try {
     const settings = await Bun.file(CLAUDE_SETTINGS_FILE).json();
     delete settings.statusLine;
-    await writeFile(CLAUDE_SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
+    await atomicWriteFile(CLAUDE_SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
   } catch {
     // file doesn't exist, nothing to clean up
   }

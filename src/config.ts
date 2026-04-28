@@ -4,6 +4,7 @@ import { existsSync } from "fs";
 import { z } from "zod";
 import { normalizeTimezoneName, resolveTimezoneOffsetMinutes } from "./timezone";
 import { HEARTBEAT_DIR, JOBS_DIR, LOGS_DIR, SETTINGS_FILE } from "./paths";
+import { atomicWriteFile } from "./atomic-write";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -235,7 +236,7 @@ export async function initConfig(): Promise<void> {
   await mkdir(LOGS_DIR, { recursive: true });
 
   if (!existsSync(SETTINGS_FILE)) {
-    await Bun.write(SETTINGS_FILE, JSON.stringify(DEFAULT_SETTINGS, null, 2) + "\n");
+    await atomicWriteFile(SETTINGS_FILE, JSON.stringify(DEFAULT_SETTINGS, null, 2) + "\n");
   }
 }
 
