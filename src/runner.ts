@@ -117,10 +117,36 @@ export function buildChildEnv(baseEnv: Record<string, string>, model: string, ap
   return childEnv;
 }
 
-/** Strip CLAUDECODE env var so child claude processes don't think they're nested. */
+/**
+ * Build a sanitized env for spawning the `claude` CLI as a long-running daemon
+ * subprocess. Drops env vars injected by a parent Claude Code / Claude Desktop
+ * session that break detached child auth:
+ *
+ * - `CLAUDECODE`: marks "we're nested inside Claude Code" — confuses the CLI's
+ *   reentry detection and triggers transcript-aware behaviour we don't want.
+ * - `CLAUDE_CODE_OAUTH_TOKEN`: the parent's frozen OAuth access token. Without
+ *   the matching refresh token (which lives in the platform-native credential
+ *   store, not the env), it expires after ~8h and the daemon's spawned `claude`
+ *   processes start returning HTTP 401 silently. Stripping it lets the CLI
+ *   fall back to the credential store on each platform — Keychain on macOS,
+ *   `~/.claude/.credentials.json` on Linux/WSL2, Credential Manager on Windows
+ *   — which handles refresh automatically.
+ * - `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`: tells the CLI "the host process
+ *   manages provider auth — don't read local credentials." In a detached
+ *   daemon there is no host to consult; the CLI errors with `Not logged in`.
+ */
 export function getCleanEnv(): Record<string, string> {
-  const { CLAUDECODE: _, ...rest } = process.env;
-  return { ...rest } as Record<string, string>;
+  const stripped = new Set([
+    "CLAUDECODE",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+  ]);
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (stripped.has(key)) continue;
+    if (typeof value === "string") out[key] = value;
+  }
+  return out;
 }
 
 /** Default timeout for a single Claude Code invocation (5 minutes). */
@@ -486,7 +512,7 @@ export async function compactCurrentSession(): Promise<{ success: boolean; messa
     : { success: false, message: `❌ Compact failed (${existing.sessionId.slice(0, 8)})` };
 }
 
-async function execClaude(name: string, prompt: string, sessionKey: string): Promise<RunResult> {
+async function execClaude(name: string, prompt: string, sessionKey: string, modelOverride?: string): Promise<RunResult> {
   await mkdir(LOGS_DIR, { recursive: true });
 
   const existing = await getSession(sessionKey);
@@ -502,7 +528,10 @@ async function execClaude(name: string, prompt: string, sessionKey: string): Pro
   let taskType = "unknown";
   let routingReasoning = "";
 
-  if (agentic.enabled) {
+  if (modelOverride) {
+    primaryConfig = { model: modelOverride, api };
+    console.log(`[${new Date().toLocaleTimeString()}] Job model override: ${modelOverride}`);
+  } else if (agentic.enabled) {
     const routing = selectModel(prompt, agentic.modes, agentic.defaultMode);
     if (!routing.model) {
       console.warn(`[${new Date().toLocaleTimeString()}] Agentic routing returned empty model, falling back to default`);
@@ -675,8 +704,8 @@ async function execClaude(name: string, prompt: string, sessionKey: string): Pro
   return result;
 }
 
-export async function run(name: string, prompt: string, sessionKey: string = DEFAULT_SESSION_KEY): Promise<RunResult> {
-  return enqueue(() => execClaude(name, prompt, sessionKey), sessionKey);
+export async function run(name: string, prompt: string, sessionKey: string = DEFAULT_SESSION_KEY, modelOverride?: string): Promise<RunResult> {
+  return enqueue(() => execClaude(name, prompt, sessionKey, modelOverride), sessionKey);
 }
 
 async function streamClaude(

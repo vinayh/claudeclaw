@@ -106,6 +106,22 @@ schedule: "0 9 * * *"
 `;
     expect(parseJobFile("trim", content)!.prompt).toBe("some prompt with whitespace");
   });
+
+  it("parses model frontmatter when present", () => {
+    const content = `---
+schedule: "0 * * * *"
+model: haiku
+---
+prompt`;
+    expect(parseJobFile("with-model", content)!.model).toBe("haiku");
+  });
+
+  it("leaves model undefined when absent or empty", () => {
+    const noModel = `---\nschedule: "0 * * * *"\n---\nprompt`;
+    expect(parseJobFile("no-model", noModel)!.model).toBeUndefined();
+    const emptyModel = `---\nschedule: "0 * * * *"\nmodel: ""\n---\nprompt`;
+    expect(parseJobFile("empty-model", emptyModel)!.model).toBeUndefined();
+  });
 });
 
 describe("stripScheduleFromContent", () => {

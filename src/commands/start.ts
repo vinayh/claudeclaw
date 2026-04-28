@@ -593,7 +593,11 @@ export async function start(args: string[] = []) {
         })
         .then((r) => {
           if (!r) return;
-          const shouldForward = currentSettings.heartbeat.forwardToTelegram || !r.stdout.trim().startsWith("HEARTBEAT_OK");
+          // stream-json concatenates every assistant text block — including pre-tool
+          // narration — so the HEARTBEAT_OK sentinel is at the END of the reply, not
+          // the start. startsWith() worked under the legacy "text" output format which
+          // returned only the final block; endsWith() is correct for stream-json.
+          const shouldForward = currentSettings.heartbeat.forwardToTelegram || !r.stdout.trim().endsWith("HEARTBEAT_OK");
           if (shouldForward) {
             forwardToAll("", r);
           }
@@ -723,7 +727,7 @@ export async function start(args: string[] = []) {
     for (const job of currentJobs) {
       if (cronMatches(job.schedule, now, currentSettings.timezoneOffsetMinutes)) {
         resolvePrompt(job.prompt)
-          .then((prompt) => run(job.name, prompt))
+          .then((prompt) => run(job.name, prompt, undefined, job.model))
           .then((r) => {
             if (job.notify === false) return;
             if (job.notify === "error" && r.exitCode === 0) return;

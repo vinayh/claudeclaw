@@ -101,6 +101,8 @@ Your prompt here. Claude will run this at the scheduled time.
 **`recurring`**: If `true`, the job repeats on schedule. If omitted or `false`, the job is **one-shot** — the schedule is removed from the file after it runs.
 Legacy compatibility: `daily` is still accepted in existing job files.
 
+**`model`** (optional): Overrides the global model for this job (e.g. `model: haiku` to route a cheap recurring task off your default model). When set, takes precedence over agentic routing. When omitted, behaviour is unchanged.
+
 | Expression       | Meaning                  |
 |------------------|--------------------------|
 | `* * * * *`      | Every minute             |

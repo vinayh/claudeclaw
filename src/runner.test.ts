@@ -134,15 +134,29 @@ describe("buildChildEnv", () => {
 });
 
 describe("getCleanEnv", () => {
-  it("strips CLAUDECODE from env", () => {
-    const original = process.env.CLAUDECODE;
-    process.env.CLAUDECODE = "test-value";
-    const result = getCleanEnv();
-    expect(result.CLAUDECODE).toBeUndefined();
-    // Restore
-    if (original !== undefined) process.env.CLAUDECODE = original;
-    else delete process.env.CLAUDECODE;
-  });
+  const STRIPPED_KEYS = [
+    "CLAUDECODE",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+  ] as const;
+
+  function withTempEnv(key: string, value: string, fn: () => void) {
+    const original = process.env[key];
+    process.env[key] = value;
+    try { fn(); } finally {
+      if (original !== undefined) process.env[key] = original;
+      else delete process.env[key];
+    }
+  }
+
+  for (const key of STRIPPED_KEYS) {
+    it(`strips ${key} from env`, () => {
+      withTempEnv(key, "test-value", () => {
+        const result = getCleanEnv();
+        expect(result[key]).toBeUndefined();
+      });
+    });
+  }
 
   it("preserves other env vars", () => {
     const result = getCleanEnv();
