@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.1](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.3.0...claudeclaw-v1.3.1) (2026-05-01)
+
+
+### Bug Fixes
+
+* backport six bug fixes from upstream ([7b9e36b](https://github.com/vinayh/claudeclaw/commit/7b9e36b7cd4a439e69f59a48262d893077f0a7d8))
+* **config:** fall back to validated discord ids when extracted is empty ([7b9e36b](https://github.com/vinayh/claudeclaw/commit/7b9e36b7cd4a439e69f59a48262d893077f0a7d8))
+* **runner:** cap stderr stream read at 10 MB ([7b9e36b](https://github.com/vinayh/claudeclaw/commit/7b9e36b7cd4a439e69f59a48262d893077f0a7d8))
+* **runner:** drop superfluous prompt template appending ([7b9e36b](https://github.com/vinayh/claudeclaw/commit/7b9e36b7cd4a439e69f59a48262d893077f0a7d8))
+* **send:** ensure project CLAUDE.md exists before send ([7b9e36b](https://github.com/vinayh/claudeclaw/commit/7b9e36b7cd4a439e69f59a48262d893077f0a7d8))
+* **start:** prefix heartbeat and job runs with current clock ([7b9e36b](https://github.com/vinayh/claudeclaw/commit/7b9e36b7cd4a439e69f59a48262d893077f0a7d8))
+* **telegram:** guard startPolling against double invocation ([7b9e36b](https://github.com/vinayh/claudeclaw/commit/7b9e36b7cd4a439e69f59a48262d893077f0a7d8))
+
 ## [1.3.0](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.2.0...claudeclaw-v1.3.0) (2026-04-28)
 
 

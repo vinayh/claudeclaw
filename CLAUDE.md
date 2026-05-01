@@ -67,6 +67,25 @@ Service file: `~/.config/systemd/user/claudeclaw.service`
 Working directory: `~/claudeclaw` (the project being managed)
 Logs: `~/claudeclaw/.claude/claudeclaw/logs/`
 
+## Upstream syncing
+
+This is a fork of [moazbuilds/claudeclaw](https://github.com/moazbuilds/claudeclaw) and has diverged significantly (different Discord client, chat abstraction, scheduler, license). Full merges from upstream are not viable, but periodic audits keep the fork from drifting too far on bug fixes. The `upstream` git remote points at upstream's master.
+
+**Audit cycle:**
+
+1. `git fetch upstream`
+2. Review what's new: `git log upstream/master --not main --no-merges`
+3. For each commit, decide: backport, already-in-fork, deferred-feature, or not-relevant. Backport the worthwhile ones via normal `fix:` / `feat:` commits on `main`.
+4. Record the audit in this file under **Upstream audit log** below — date, upstream tip SHA, what was backported, what was skipped and why. That's the durable signal for "have I looked at upstream recently."
+
+**Don't use `git merge -s ours upstream/master` to silence GitHub's "N commits behind" counter.** It looks tempting because it resets the count to 0, but it makes all of upstream's commits reachable from main, which causes release-please (and any other commit-walking changelog tool) to include them in the next release PR with their original conventional-commit prefixes — producing a bogus changelog and an inflated version bump. This was tried once on 2026-05-01 and immediately reverted (see git log around `42ea9d4` if you can still find it; the force-push removed it from main).
+
+The "N commits behind" counter is metadata noise on GitHub's UI. It's not a release blocker, a CI signal, or anything else that breaks if it grows. Live with it; rely on the audit log for the actual signal.
+
+**Upstream audit log:**
+
+- 2026-05-01 — audited through `d9365e0`. Backported `d861170 a184f94 8296d94 3b7ea53 5eca16d f6041c3` in `7b9e36b`. Already in fork: `328be28 b2c6174 9c2fedb b17de93 113ce46 04c7f54 2173e11 6d9336e 22bae26 75257d1`. Deferred features: telegram listenChats, discord text attachments, per-job timeout/retry bundle, agent-scoped jobs, watchdog, plugin marketplace wizard, plugin Phase 2 isolation. Not relevant: CI/version-bump enforcement, MIT license addition (fork now GPL-3.0; upstream MIT preserved in NOTICE.md), README badges.
+
 ## Key files
 
 - `src/runner.ts` — execution engine, prompt assembly, compact logic, env sanitization
