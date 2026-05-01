@@ -13,9 +13,11 @@
 
 <p align="center"><b>A lightweight, open-source OpenClaw version built into your Claude Code.</b></p>
 
-## Fork Changes
+## Fork Changes (GPL-3.0 licensed)
 
-This is a fork of [moazbuilds/ClaudeClaw](https://github.com/moazbuilds/ClaudeClaw) with the following changes:
+This is a fork of [moazbuilds/ClaudeClaw](https://github.com/moazbuilds/ClaudeClaw) (MIT-licensed). The fork as a whole is distributed under the **GNU General Public License v3.0** (see [`LICENSE.md`](LICENSE.md)). Upstream's MIT copyright is preserved in [`NOTICE.md`](NOTICE.md) and continues to cover all upstream-derived portions; new contributions made in this fork are GPL-3.0. Copyright (c) 2026 Vinay Hiremath.
+
+Notable changes vs. upstream:
 
 **Architecture**
 - **Discord migrated to discord.js:** Replaced the hand-rolled Discord Gateway/REST client with [discord.js](https://discord.js.org/). Eliminates a class of thread-membership and reconnect bugs (Discord's intent-driven gateway is complex enough that a maintained library is the right call) and unlocks first-class typed access to attachments, threads, and slash commands.
