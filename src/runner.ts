@@ -211,6 +211,45 @@ export async function handleStreamJsonEvent(
   }
 }
 
+// Cap stdout/stderr to prevent unbounded memory growth from a runaway child.
+// 10 MB is far beyond any real Claude response; protects against pathological streams only.
+const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Read a byte stream into a string, stopping accumulation at maxBytes but
+ * continuing to drain so the child process isn't blocked on a full pipe.
+ */
+export async function collectStream(stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<string> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (totalBytes < maxBytes) {
+        const space = maxBytes - totalBytes;
+        if (value.byteLength <= space) {
+          chunks.push(value);
+          totalBytes += value.byteLength;
+        } else {
+          chunks.push(value.subarray(0, space));
+          totalBytes = maxBytes;
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
 /**
  * Consume a newline-delimited JSON stream from Claude Code `-p --output-format stream-json`,
  * dispatching each event to the supplied handlers. Silently skips unparseable lines.
@@ -303,7 +342,7 @@ async function runClaudeOnce(
     const [, stderr] = await Promise.race([
       Promise.all([
         consumeStreamJsonStream(proc.stdout, handlers),
-        new Response(proc.stderr).text(),
+        collectStream(proc.stderr as ReadableStream<Uint8Array>, MAX_OUTPUT_BYTES),
       ]),
       timeoutPromise,
     ]) as [void, string];
@@ -567,16 +606,14 @@ async function execClaude(name: string, prompt: string, sessionKey: string, mode
     args.push("--resume", existing.sessionId);
   }
 
-  // Build the appended system prompt: prompt files + directory scoping
-  // This is passed on EVERY invocation (not just new sessions) because
-  // --append-system-prompt does not persist across --resume.
-  const promptContent = await loadPrompts();
+  // Build the appended system prompt: CLAUDE.md + directory scoping.
+  // Prompt files (IDENTITY.md, USER.md, SOUL.md) are already embedded in
+  // CLAUDE.md by ensureProjectClaudeMd(), so loading them here would duplicate
+  // their content in every --append-system-prompt call.
   const appendParts: string[] = [
     "You are running inside ClaudeClaw.",
   ];
-  if (promptContent) appendParts.push(promptContent);
 
-  // Load the project's CLAUDE.md if it exists
   if (existsSync(PROJECT_CLAUDE_MD)) {
     try {
       const claudeMd = await Bun.file(PROJECT_CLAUDE_MD).text();
@@ -727,9 +764,9 @@ async function streamClaude(
 
   if (existing) args.push("--resume", existing.sessionId);
 
-  const promptContent = await loadPrompts();
+  // Prompt files are already embedded in CLAUDE.md by ensureProjectClaudeMd();
+  // appending loadPrompts() here would duplicate them.
   const appendParts: string[] = ["You are running inside ClaudeClaw."];
-  if (promptContent) appendParts.push(promptContent);
 
   if (existsSync(PROJECT_CLAUDE_MD)) {
     try {

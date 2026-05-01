@@ -317,8 +317,12 @@ export function parseSettings(raw: unknown, discordIds?: DiscordSnowflakes): Set
     },
     discord: {
       token: process.env.DISCORD_TOKEN || validated.discord.token,
-      allowedUserIds: discordIds?.allowedUserIds ?? validated.discord.allowedUserIds,
-      listenChannels: discordIds?.listenChannels ?? validated.discord.listenChannels,
+      allowedUserIds: discordIds?.allowedUserIds && discordIds.allowedUserIds.length > 0
+        ? discordIds.allowedUserIds
+        : validated.discord.allowedUserIds,
+      listenChannels: discordIds?.listenChannels && discordIds.listenChannels.length > 0
+        ? discordIds.listenChannels
+        : validated.discord.listenChannels,
     },
     security: validated.security,
     web: validated.web,

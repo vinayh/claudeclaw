@@ -8,7 +8,7 @@ import { getLastFired, setLastFired, forgetJob } from "../jobsState";
 import { clearJobSchedule, loadJobs } from "../jobs";
 import { writePidFile, cleanupPidFile, checkExistingDaemon } from "../pid";
 import { initConfig, loadSettings, reloadSettings, resolvePrompt, type HeartbeatConfig, type Settings } from "../config";
-import { getDayAndMinuteAtOffset } from "../timezone";
+import { getDayAndMinuteAtOffset, buildClockPromptPrefix } from "../timezone";
 import { startWebUi, type WebServerHandle } from "../web";
 import { CLAUDE_DIR, HEARTBEAT_DIR, STATUSLINE_FILE, CLAUDE_SETTINGS_FILE } from "../paths";
 import { atomicWriteFile } from "../atomic-write";
@@ -592,7 +592,8 @@ export async function start(args: string[] = []) {
             .filter((part) => part.length > 0)
             .join("\n\n");
           if (!mergedPrompt) return null;
-          return run("heartbeat", mergedPrompt);
+          const clock = buildClockPromptPrefix(new Date(), currentSettings.timezoneOffsetMinutes);
+          return run("heartbeat", `${clock}\n${mergedPrompt}`);
         })
         .then((r) => {
           if (!r) return;
@@ -743,7 +744,10 @@ export async function start(args: string[] = []) {
 
   function fireJob(job: Job) {
     resolvePrompt(job.prompt)
-      .then((prompt) => run(job.name, prompt, undefined, job.model))
+      .then((prompt) => {
+        const clock = buildClockPromptPrefix(new Date(), currentSettings.timezoneOffsetMinutes);
+        return run(job.name, `${clock}\n${prompt}`, undefined, job.model);
+      })
       .then((r) => {
         if (job.notify === false) return;
         if (job.notify === "error" && r.exitCode === 0) return;
