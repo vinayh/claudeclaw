@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.3.1...claudeclaw-v1.4.0) (2026-05-07)
+
+
+### Features
+
+* **discord:** include reply and forwarded message context in prompt ([0ce4653](https://github.com/vinayh/claudeclaw/commit/0ce46539c7054a415dfca3b6273ab818b2758d21))
+
+
+### Bug Fixes
+
+* backport upstream stale-session, rate-limit pause, and PID/frontmatter fixes ([3017840](https://github.com/vinayh/claudeclaw/commit/3017840099eec69d7521ec25ccf59ad9e7657a95))
+
 ## [1.3.1](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.3.0...claudeclaw-v1.3.1) (2026-05-01)
 
 
