@@ -309,27 +309,63 @@ async function callApi<T>(token: string, method: string, body?: Record<string, u
   return (await res.json()) as T;
 }
 
+/**
+ * Split markdown text into Telegram-sized chunks at safe boundaries
+ * (paragraph → line → word → hard cut). Splitting markdown rather than
+ * post-conversion HTML guarantees each chunk's HTML is well-formed: the old
+ * approach of `html.slice(i, i + MAX_LEN)` could land mid-tag (e.g. inside
+ * `<a href="...">`), producing HTML that Telegram's parser rejects.
+ */
+export function splitMarkdownForTelegram(text: string, maxLen: number): string[] {
+  if (text.length <= maxLen) return [text];
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > maxLen) {
+    let splitAt = remaining.lastIndexOf("\n\n", maxLen);
+    if (splitAt < maxLen / 2) splitAt = remaining.lastIndexOf("\n", maxLen);
+    if (splitAt < maxLen / 2) splitAt = remaining.lastIndexOf(" ", maxLen);
+    if (splitAt <= 0) splitAt = maxLen;
+    chunks.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt).replace(/^[\s\n]+/, "");
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
 async function sendMessage(token: string, chatId: number, text: string, threadId?: number): Promise<void> {
   const normalized = normalizeTelegramText(text).replace(/\[react:[^\]\r\n]+\]/gi, "");
-  const html = markdownToTelegramHtml(normalized);
-  const MAX_LEN = 4096;
+  if (!normalized.trim()) return;
+
+  const TELEGRAM_MAX = 4096;
+  // Leave headroom for HTML escapes (`<` → `&lt;`, etc.) and tag overhead so
+  // the converted chunk doesn't blow past Telegram's 4096-char ceiling.
+  const CHUNK_LIMIT = 3800;
   const threadOpts = threadId ? { message_thread_id: threadId } : {};
 
-  // Try HTML first; on parse failure fall back to plain text with correct chunking
-  try {
-    for (let i = 0; i < html.length; i += MAX_LEN) {
+  for (const chunk of splitMarkdownForTelegram(normalized, CHUNK_LIMIT)) {
+    const html = markdownToTelegramHtml(chunk);
+    // If conversion still overshoots (very tag-dense input), send the raw
+    // chunk as plain text rather than risk a tag being clipped at the boundary.
+    if (html.length > TELEGRAM_MAX) {
       await callApi(token, "sendMessage", {
         chat_id: chatId,
-        text: html.slice(i, i + MAX_LEN),
+        text: chunk.slice(0, TELEGRAM_MAX),
+        ...threadOpts,
+      });
+      continue;
+    }
+    try {
+      await callApi(token, "sendMessage", {
+        chat_id: chatId,
+        text: html,
         parse_mode: "HTML",
         ...threadOpts,
       });
-    }
-  } catch {
-    for (let i = 0; i < normalized.length; i += MAX_LEN) {
+    } catch {
+      // HTML parse error from Telegram — fall back to plain text for this chunk.
       await callApi(token, "sendMessage", {
         chat_id: chatId,
-        text: normalized.slice(i, i + MAX_LEN),
+        text: chunk,
         ...threadOpts,
       });
     }
@@ -595,6 +631,24 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
 
   if (!text.trim() && !hasImage && !hasVoice && !hasDocument) {
     debugLog(`Skip message chat=${chatId} from=${userId ?? "unknown"} reason=empty_text`);
+    return;
+  }
+
+  // Authorization gate — runs BEFORE the secretary handler (which calls a
+  // localhost confirm endpoint that does not authenticate the caller) and
+  // before attachment downloads/transcription. Without this gate, an
+  // unauthorized user replying to a bot message in a group could drive the
+  // secretary "custom reply" flow, and any group member could trigger media
+  // downloads. handleChatMessage still re-checks as defense in depth.
+  const allowedIds = config.allowedUserIds;
+  if (allowedIds.length > 0 && (userId === undefined || !allowedIds.includes(userId))) {
+    if (isPrivate) {
+      await sendMessage(config.token, chatId, "Unauthorized.", threadId).catch((err) =>
+        console.error(`[Telegram] Failed to send unauthorized reply: ${err instanceof Error ? err.message : err}`)
+      );
+    } else {
+      debugLog(`Skip message chat=${chatId} from=${userId ?? "unknown"} reason=unauthorized_user`);
+    }
     return;
   }
 

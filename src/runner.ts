@@ -155,12 +155,18 @@ function enqueue<T>(fn: () => Promise<T>, sessionKey: string): Promise<T> {
   return task;
 }
 
-export function extractRateLimitMessage(stdout: string, stderr: string): string | null {
-  const candidates = [stdout, stderr];
-  for (const text of candidates) {
-    const trimmed = text.trim();
-    if (trimmed && RATE_LIMIT_PATTERN.test(trimmed)) return trimmed;
-  }
+/**
+ * Detect a rate-limit message in Claude CLI output.
+ *
+ * Matches stderr only — Claude Code emits usage-limit notices on stderr
+ * (Unix convention for diagnostic output). Matching stdout would produce
+ * false positives whenever the model itself answers a question whose text
+ * happens to contain phrases like "you've hit your limit," wedging the
+ * daemon into an unwarranted rate-limit pause.
+ */
+export function extractRateLimitMessage(stderr: string): string | null {
+  const trimmed = stderr.trim();
+  if (trimmed && RATE_LIMIT_PATTERN.test(trimmed)) return trimmed;
   return null;
 }
 
@@ -716,7 +722,7 @@ async function execClaude(name: string, prompt: string, sessionKey: string, mode
   args.push("--settings", JSON.stringify({ autoMemoryDirectory: memoryDir }));
 
   let exec = await runClaudeOnce(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs, sessionCwd);
-  const primaryRateLimit = extractRateLimitMessage(exec.rawStdout, exec.stderr);
+  const primaryRateLimit = extractRateLimitMessage(exec.stderr);
   let usedFallback = false;
 
   if (primaryRateLimit && hasModelConfig(fallbackConfig) && !sameModelConfig(primaryConfig, fallbackConfig)) {
@@ -768,7 +774,7 @@ async function execClaude(name: string, prompt: string, sessionKey: string, mode
     recoveredFromStale = true;
   }
 
-  const rateLimitMessage = extractRateLimitMessage(rawStdout, stderr);
+  const rateLimitMessage = extractRateLimitMessage(stderr);
 
   if (rateLimitMessage) {
     stdout = rateLimitMessage;

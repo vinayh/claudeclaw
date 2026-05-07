@@ -13,22 +13,28 @@ import {
 } from "./runner";
 
 describe("extractRateLimitMessage", () => {
-  it("detects 'hit your limit' in stdout", () => {
-    const result = extractRateLimitMessage("You've hit your limit for today", "");
+  it("detects 'hit your limit' in stderr", () => {
+    const result = extractRateLimitMessage("You've hit your limit for today");
     expect(result).toBe("You've hit your limit for today");
   });
 
   it("detects 'out of extra usage' in stderr", () => {
-    const result = extractRateLimitMessage("", "out of extra usage");
+    const result = extractRateLimitMessage("out of extra usage");
     expect(result).toBe("out of extra usage");
   });
 
-  it("returns null when no rate limit message", () => {
-    expect(extractRateLimitMessage("normal output", "normal error")).toBeNull();
+  it("ignores rate-limit phrasing in stdout (assistant text may quote it)", () => {
+    // Stdout-only matches caused false positives when the model answered
+    // questions about API limits. Rate-limit detection is stderr-only now.
+    expect(extractRateLimitMessage("")).toBeNull();
   });
 
-  it("returns null for empty strings", () => {
-    expect(extractRateLimitMessage("", "")).toBeNull();
+  it("returns null for empty stderr", () => {
+    expect(extractRateLimitMessage("")).toBeNull();
+  });
+
+  it("returns null for non-matching stderr", () => {
+    expect(extractRateLimitMessage("normal error output")).toBeNull();
   });
 });
 

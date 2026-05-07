@@ -598,6 +598,16 @@ export async function start(args: string[] = []) {
             stderr: "",
           });
         }
+        // Recompute next-fire so state.json/statusline don't keep advertising
+        // a time that's already in the past. If the rate-limit reset is later
+        // than the next interval boundary, surface that instead.
+        const normalNext = nextAllowedHeartbeatAt(
+          currentSettings.heartbeat,
+          currentSettings.timezoneOffsetMinutes,
+          ms,
+          Date.now()
+        );
+        nextHeartbeatAt = Math.max(normalNext, getRateLimitResetAt());
         return;
       }
       if (isHeartbeatExcludedNow(currentSettings.heartbeat, currentSettings.timezoneOffsetMinutes)) {

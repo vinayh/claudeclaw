@@ -11,7 +11,7 @@ import {
   type Attachment,
   type ThreadChannel,
 } from "discord.js";
-import { ensureProjectClaudeMd, run, compactCurrentSession } from "../runner";
+import { ensureProjectClaudeMd, run, compactCurrentSession, getCleanEnv } from "../runner";
 import { getSettings, loadSettings } from "../config";
 import { listSessions, removeSession, peekSessionEntry, resetDefaultSession, peekDefaultSession } from "../sessionManager";
 import { homedir } from "node:os";
@@ -132,6 +132,8 @@ interface ThreadIntent {
   names: string[];
 }
 
+const CLASSIFIER_TIMEOUT_MS = 15_000;
+
 async function classifyThreadIntent(text: string): Promise<ThreadIntent | null> {
   const systemPrompt = `You classify user messages into thread management intents.
 
@@ -148,24 +150,55 @@ Rules:
 - Common patterns: \u6D3E/\u6D3E\u51FA/\u51FA\u5F81/\u4E0A\u9663/\u8FCE\u6230/\u51FA\u6230 = hire. \u64A4/\u64A4\u56DE/\u6536\u56DE/\u53EB\u56DE\u4F86/\u6EFE = fire.
 - Return ONLY valid JSON or the word null. No explanation.`;
 
+  // Use Bun.spawn instead of execSync \u2014 execSync blocked the entire event
+  // loop for up to 15s, freezing Discord polling, Telegram polling, the
+  // heartbeat scheduler, and the web UI on every classifier invocation.
+  let proc: ReturnType<typeof Bun.spawn> | null = null;
   try {
-    const { execSync } = await import("node:child_process");
     const input = `${systemPrompt}\n\n---\nUser message: ${text}`;
-    const result = execSync(
-      `claude --model claude-sonnet-4-20250514 --print --output-format text`,
-      {
-        input,
-        encoding: "utf-8",
-        timeout: 15000,
-        env: { ...process.env, HOME: homedir() },
-      },
-    ).trim();
+    const settings = getSettings();
+    const configuredModel = settings.model.trim();
 
+    // Pull --model from settings.model when configured; otherwise let the CLI
+    // pick its default rather than pinning a hardcoded ID that drifts/deprecates.
+    const args = ["claude", "--print", "--output-format", "text"];
+    if (configuredModel && configuredModel.toLowerCase() !== "glm") {
+      args.push("--model", configuredModel);
+    }
+
+    proc = Bun.spawn(args, {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...getCleanEnv(), HOME: homedir() },
+    });
+
+    const stdin = proc.stdin as Bun.FileSink;
+    stdin.write(input);
+    stdin.end();
+
+    let timedOut = false;
+    const killTimer = setTimeout(() => {
+      timedOut = true;
+      try { proc?.kill("SIGTERM"); } catch {}
+      setTimeout(() => { try { proc?.kill("SIGKILL"); } catch {} }, 2000);
+    }, CLASSIFIER_TIMEOUT_MS);
+
+    const [stdout, exitCode] = await Promise.all([
+      new Response(proc.stdout as ReadableStream<Uint8Array>).text(),
+      proc.exited,
+    ]);
+    clearTimeout(killTimer);
+
+    if (timedOut || exitCode !== 0) return null;
+
+    const result = stdout.trim();
     if (!result || result === "null") return null;
     const jsonMatch = result.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
     return JSON.parse(jsonMatch[0]) as ThreadIntent;
   } catch (err) {
+    try { proc?.kill("SIGTERM"); } catch {}
     console.error(`[Discord] Intent classifier error: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
@@ -227,11 +260,27 @@ async function handleMessageCreate(message: Message): Promise<void> {
   }
 
   const label = message.author.username;
+  const adapter = createAdapter();
+
+  // Authorization gate — runs BEFORE attachment downloads, transcription, and
+  // the AI thread-intent classifier. Each of those is expensive (network I/O,
+  // a `claude` subprocess), and previously every guild-channel message — even
+  // from non-allowed users — would trigger them, letting any guild member burn
+  // API tokens. handleChatMessage still re-checks as defense in depth.
+  if (config.allowedUserIds.length > 0 && !config.allowedUserIds.includes(userId)) {
+    if (isDM) {
+      await adapter.sendMessage(channelId, "Unauthorized.").catch((err) =>
+        console.error(`[Discord] Failed to send unauthorized DM reply: ${err}`)
+      );
+    } else {
+      debugLog(`Skip message channel=${channelId} from=${userId} reason=unauthorized_user`);
+    }
+    return;
+  }
+
   const mediaParts = [hasImage ? "image" : "", hasVoice ? "voice" : ""].filter(Boolean);
   const mediaSuffix = mediaParts.length > 0 ? ` [${mediaParts.join("+")}]` : "";
   logIncomingMessage("Discord", label, cleanContent, mediaSuffix);
-
-  const adapter = createAdapter();
 
   await withTypingIndicator(adapter, channelId, undefined, async () => {
     // Download attachments via shared handler
