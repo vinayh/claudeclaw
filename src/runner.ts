@@ -6,8 +6,10 @@ import {
   DEFAULT_SESSION_KEY,
   getSession,
   createSession,
+  removeSession,
   incrementTurn,
   markCompactWarned,
+  backupDefaultSession,
 } from "./sessionManager";
 import { getSettings, type ModelConfig, type SecurityConfig } from "./config";
 import { buildClockPromptPrefix } from "./timezone";
@@ -60,6 +62,81 @@ export interface RunResult {
 }
 
 const RATE_LIMIT_PATTERN = /you.ve hit your limit|out of extra usage/i;
+const RATE_LIMIT_RESET_PATTERN = /resets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*\(?\s*UTC\s*\)?/i;
+
+// Claude Code prints these when --resume references a session it can no longer
+// use: either the on-disk record is gone (cleared, expired, compacted away,
+// migrated to another machine) or the thinking-block signatures it recorded
+// no longer verify. In both cases the cached session ID is unrecoverable and
+// the only option is to drop --resume and start fresh.
+const STALE_SESSION_PATTERN = /No conversation found with session ID/i;
+const SIGNATURE_ERROR_PATTERN = /Invalid.*signature.*thinking block/i;
+
+function isSessionRecoveryNeeded(stdout: string, stderr: string): boolean {
+  const combined = stdout + "\n" + stderr;
+  return STALE_SESSION_PATTERN.test(combined) || SIGNATURE_ERROR_PATTERN.test(combined);
+}
+
+/** Strip --resume <id> from a claude argv list so it runs as a brand-new session. */
+function stripResume(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--resume") {
+      i += 1; // skip the session id that follows
+      continue;
+    }
+    out.push(args[i]!);
+  }
+  return out;
+}
+
+// --- Rate limit state ---
+// When Claude reports a usage limit, all callers (heartbeat tick, cron tick,
+// chat-handler) gate on isRateLimited() so they skip work and notify the user
+// once instead of generating spam errors every minute until the window passes.
+let rateLimitResetAt = 0; // epoch ms; 0 = not rate-limited
+let rateLimitNotified = false;
+
+function parseRateLimitResetTime(message: string): number | null {
+  const match = message.match(RATE_LIMIT_RESET_PATTERN);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = match[2] ? Number(match[2]) : 0;
+  const ampm = match[3]?.toLowerCase();
+  if (ampm === "pm" && hour < 12) hour += 12;
+  if (ampm === "am" && hour === 12) hour = 0;
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
+  if (!Number.isFinite(minute) || minute < 0 || minute > 59) return null;
+
+  const now = new Date();
+  const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour, minute, 0, 0));
+  if (reset.getTime() <= now.getTime()) {
+    reset.setUTCDate(reset.getUTCDate() + 1);
+  }
+  return reset.getTime();
+}
+
+export function isRateLimited(): boolean {
+  if (rateLimitResetAt === 0) return false;
+  if (Date.now() >= rateLimitResetAt) {
+    rateLimitResetAt = 0;
+    rateLimitNotified = false;
+    return false;
+  }
+  return true;
+}
+
+export function getRateLimitResetAt(): number {
+  return rateLimitResetAt;
+}
+
+export function wasRateLimitNotified(): boolean {
+  return rateLimitNotified;
+}
+
+export function markRateLimitNotified(): void {
+  rateLimitNotified = true;
+}
 
 // Per-session queues — each session runs independently in parallel
 const sessionQueues = new Map<string, Promise<unknown>>();
@@ -650,19 +727,66 @@ async function execClaude(name: string, prompt: string, sessionKey: string, mode
     usedFallback = true;
   }
 
-  const rawStdout = exec.rawStdout;
-  const stderr = exec.stderr;
-  const exitCode = exec.exitCode;
+  let rawStdout = exec.rawStdout;
+  let stderr = exec.stderr;
+  let exitCode = exec.exitCode;
   let stdout = rawStdout;
   let sessionId = exec.sessionId ?? existing?.sessionId ?? "unknown";
+
+  // --- Stale session / signature error recovery ---
+  // Claude Code returns "No conversation found with session ID" when --resume
+  // points at a session it no longer has, and "Invalid signature thinking
+  // block..." when the cached session's thinking blocks no longer verify. In
+  // both cases the cached ID is unrecoverable; back it up and retry once
+  // without --resume so the user isn't stuck looping forever.
+  let recoveredFromStale = false;
+  if (
+    !isNew &&
+    exitCode !== 0 &&
+    existing &&
+    isSessionRecoveryNeeded(rawStdout, stderr)
+  ) {
+    console.warn(
+      `[${new Date().toLocaleTimeString()}] Unrecoverable session ${existing.sessionId.slice(0, 8)} for ${name}; backing up and retrying with a fresh session...`
+    );
+
+    if (sessionKey === DEFAULT_SESSION_KEY) {
+      await backupDefaultSession();
+    } else {
+      await removeSession(sessionKey);
+    }
+
+    const retryArgs = stripResume(args);
+    const retryConfig = usedFallback ? fallbackConfig : primaryConfig;
+    exec = await runClaudeOnce(retryArgs, retryConfig.model, retryConfig.api, baseEnv, timeoutMs, sessionCwd);
+
+    rawStdout = exec.rawStdout;
+    stderr = exec.stderr;
+    exitCode = exec.exitCode;
+    stdout = rawStdout;
+    sessionId = exec.sessionId ?? "unknown";
+    recoveredFromStale = true;
+  }
+
   const rateLimitMessage = extractRateLimitMessage(rawStdout, stderr);
 
   if (rateLimitMessage) {
     stdout = rateLimitMessage;
+    // Capture reset time so heartbeats/jobs/chat can pause until the window
+    // expires. Only set on a fresh hit — don't reset the notified flag while
+    // an existing window is still open.
+    if (!isRateLimited()) {
+      const parsed = parseRateLimitResetTime(rateLimitMessage);
+      rateLimitResetAt = parsed ?? Date.now() + 60 * 60 * 1000; // default: 1h
+      rateLimitNotified = false;
+    }
   }
 
   // Persist the session ID that Claude Code reports for new sessions.
-  if (!rateLimitMessage && isNew && exitCode === 0 && exec.sessionId) {
+  // Stale-recovered runs are also "new" from the persistence standpoint —
+  // the prior --resume id is gone and the retry produced a fresh one.
+  const persistAsNew = isNew || recoveredFromStale;
+  if (!rateLimitMessage && persistAsNew && exitCode === 0 && exec.sessionId) {
     await createSession(sessionKey, exec.sessionId);
     console.log(`[${new Date().toLocaleTimeString()}] Session created: ${exec.sessionId} (key ${sessionKey.slice(0, 8)})`);
   }
@@ -691,7 +815,7 @@ async function execClaude(name: string, prompt: string, sessionKey: string, mode
   console.log(`[${new Date().toLocaleTimeString()}] Done: ${name} → ${logFile}`);
 
   // --- Auto-compact on timeout (exit 124) ---
-  if (COMPACT_TIMEOUT_ENABLED && exitCode === 124 && !isNew && existing) {
+  if (COMPACT_TIMEOUT_ENABLED && exitCode === 124 && !isNew && existing && !recoveredFromStale) {
     emitCompactEvent({ type: "auto-compact-start" });
     const compactOk = await runCompact(
       existing.sessionId,
@@ -728,7 +852,7 @@ async function execClaude(name: string, prompt: string, sessionKey: string, mode
   }
 
   // --- Turn tracking & compact warning ---
-  if (exitCode === 0 && !isNew) {
+  if (exitCode === 0 && !isNew && !recoveredFromStale) {
     const turnCount = await incrementTurn(sessionKey);
     console.log(`[${new Date().toLocaleTimeString()}] Turn count: ${turnCount} (session ${sessionKey.slice(0, 8)})`);
 
@@ -802,6 +926,10 @@ async function streamClaude(
     cwd: sessionCwd,
   });
 
+  // Drain stderr in the background so the child can't block on a full pipe.
+  // We need the text after proc.exited for stale-session detection.
+  const stderrPromise = new Response(proc.stderr).text();
+
   let unblocked = false;
   let textEmitted = false;
   const maybeUnblock = () => {
@@ -830,6 +958,26 @@ async function streamClaude(
   });
 
   await proc.exited;
+  const stderrText = await stderrPromise;
+
+  // --- Stale session / signature error recovery (stream path) ---
+  // If --resume failed because the session is gone or its thinking blocks no
+  // longer verify, back up the dead ID and retry once with a fresh session so
+  // the web UI doesn't render an empty bubble.
+  if (
+    existing &&
+    !textEmitted &&
+    (proc.exitCode ?? 0) !== 0 &&
+    isSessionRecoveryNeeded("", stderrText)
+  ) {
+    console.warn(
+      `[${new Date().toLocaleTimeString()}] Unrecoverable session ${existing.sessionId.slice(0, 8)} for ${name} (stream); backing up and retrying with a fresh session...`
+    );
+    await backupDefaultSession();
+    await streamClaude(name, prompt, onChunk, onUnblock);
+    return;
+  }
+
   maybeUnblock();
 
   console.log(`[${new Date().toLocaleTimeString()}] Done: ${name}`);

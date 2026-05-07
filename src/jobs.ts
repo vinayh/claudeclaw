@@ -100,3 +100,50 @@ export async function clearJobSchedule(jobName: string): Promise<void> {
   const result = stripScheduleFromContent(content);
   if (result) await atomicWriteFile(path, result);
 }
+
+/**
+ * Snapshot a job file's frontmatter before a run. Returns a restore function
+ * that re-applies the original frontmatter if Claude overwrote or stripped it
+ * during the run (which it can do for jobs that read or edit their own .md).
+ */
+export async function snapshotJobFrontmatter(
+  jobName: string,
+): Promise<() => Promise<boolean>> {
+  const path = join(JOBS_DIR, `${jobName}.md`);
+  let originalContent: string;
+  try {
+    originalContent = await Bun.file(path).text();
+  } catch {
+    return async () => false;
+  }
+
+  const originalMatch = originalContent.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+  if (!originalMatch) return async () => false;
+
+  const originalFrontmatter = originalMatch[1];
+
+  return async () => {
+    let currentContent: string;
+    try {
+      currentContent = await Bun.file(path).text();
+    } catch {
+      return false;
+    }
+
+    const currentMatch = currentContent.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+
+    if (!currentMatch) {
+      await atomicWriteFile(path, originalContent);
+      return true;
+    }
+
+    if (currentMatch[1].trim() !== originalFrontmatter.trim()) {
+      const restoredBody = currentMatch[2].trim();
+      const restored = `---\n${originalFrontmatter}\n---\n${restoredBody}\n`;
+      await atomicWriteFile(path, restored);
+      return true;
+    }
+
+    return false;
+  };
+}

@@ -8,7 +8,13 @@
  * download callbacks via AttachmentSources. No business logic in adapters.
  */
 
-import { runUserMessage, compactCurrentSession, type RunResult } from "./runner";
+import {
+  runUserMessage,
+  compactCurrentSession,
+  isRateLimited,
+  getRateLimitResetAt,
+  type RunResult,
+} from "./runner";
 import { getSettings } from "./config";
 import { resetDefaultSession, peekDefaultSession, listSessions } from "./sessionManager";
 import { resolveSkillPrompt } from "./skills";
@@ -449,6 +455,23 @@ export async function handleChatMessage(
   // Built-in commands
   if (!opts?.skipBuiltInCommands && isBuiltInCommand(command)) {
     return handleBuiltInCommand(command!, adapter, ctx.chatId, ctx.threadId);
+  }
+
+  // Reply immediately if a global rate-limit window is active — don't spend
+  // tokens just to surface the same error to the user one prompt at a time.
+  if (isRateLimited()) {
+    const resetAt = new Date(getRateLimitResetAt());
+    const resetStr = resetAt.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "UTC",
+    });
+    await adapter.sendMessage(
+      ctx.chatId,
+      `Usage limit reached. Resets at ${resetStr} UTC. I'll be back after that.`,
+      ctx.threadId,
+    );
+    return false;
   }
 
   try {

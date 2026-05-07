@@ -1,11 +1,22 @@
 import { writeFile, unlink, mkdir } from "fs/promises";
 import { fileURLToPath } from "url";
-import { run, runUserMessage, streamUserMessage, bootstrap, ensureProjectClaudeMd, loadHeartbeatPromptTemplate } from "../runner";
+import {
+  run,
+  runUserMessage,
+  streamUserMessage,
+  bootstrap,
+  ensureProjectClaudeMd,
+  loadHeartbeatPromptTemplate,
+  isRateLimited,
+  getRateLimitResetAt,
+  wasRateLimitNotified,
+  markRateLimitNotified,
+} from "../runner";
 import { writeState, type StateData } from "../statusline";
 import { nextCronMatch } from "../cron";
 import { computeMissedFires, msUntilNextMinute } from "../replay";
 import { getLastFired, setLastFired, forgetJob } from "../jobsState";
-import { clearJobSchedule, loadJobs } from "../jobs";
+import { clearJobSchedule, loadJobs, snapshotJobFrontmatter } from "../jobs";
 import { writePidFile, cleanupPidFile, checkExistingDaemon } from "../pid";
 import { initConfig, loadSettings, reloadSettings, resolvePrompt, type HeartbeatConfig, type Settings } from "../config";
 import { getDayAndMinuteAtOffset, buildClockPromptPrefix } from "../timezone";
@@ -56,7 +67,13 @@ function fmt(ms) {
 function alive() {
   try {
     var pid = readFileSync(PID_FILE, "utf-8").trim();
-    process.kill(Number(pid), 0);
+    var parsedPid = Number(pid);
+    // process.kill(0, 0) operates on the calling process's group and always
+    // succeeds — so an empty or corrupt pidfile would falsely report "live".
+    if (!Number.isFinite(parsedPid) || !Number.isInteger(parsedPid) || parsedPid <= 0) {
+      return false;
+    }
+    process.kill(parsedPid, 0);
     return true;
   } catch { return false; }
 }
@@ -570,6 +587,19 @@ export async function start(args: string[] = []) {
     );
 
     function tick() {
+      if (isRateLimited()) {
+        const resetAt = new Date(getRateLimitResetAt());
+        console.log(`[${ts()}] Heartbeat skipped (rate limited until ${resetAt.toISOString()})`);
+        if (!wasRateLimitNotified()) {
+          markRateLimitNotified();
+          forwardToAll("", {
+            exitCode: 1,
+            stdout: `Usage limit hit. Pausing until ${resetAt.toUTCString()}. Heartbeats and jobs suspended.`,
+            stderr: "",
+          });
+        }
+        return;
+      }
       if (isHeartbeatExcludedNow(currentSettings.heartbeat, currentSettings.timezoneOffsetMinutes)) {
         console.log(`[${ts()}] Heartbeat skipped (excluded window)`);
         nextHeartbeatAt = nextAllowedHeartbeatAt(
@@ -710,16 +740,24 @@ export async function start(args: string[] = []) {
   }, 30_000);
 
   // --- Cron tick (every 60s) ---
+  // Track each job's most recent outcome so state.json can expose lastResult/
+  // lastRanAt for the statusline. Resets on daemon restart (in-memory only).
+  const jobLastResult = new Map<string, { result: "ok" | "error"; ranAt: number }>();
+
   function updateState() {
     const now = new Date();
     const state: StateData = {
       heartbeat: currentSettings.heartbeat.enabled
         ? { nextAt: nextHeartbeatAt }
         : undefined,
-      jobs: currentJobs.map((job) => ({
-        name: job.name,
-        nextAt: nextCronMatch(job.schedule, now, currentSettings.timezoneOffsetMinutes).getTime(),
-      })),
+      jobs: currentJobs.map((job) => {
+        const last = jobLastResult.get(job.name);
+        return {
+          name: job.name,
+          nextAt: nextCronMatch(job.schedule, now, currentSettings.timezoneOffsetMinutes).getTime(),
+          ...(last ? { lastResult: last.result, lastRanAt: last.ranAt } : {}),
+        };
+      }),
       security: currentSettings.security.level,
       telegram: !!currentSettings.telegram.token,
       discord: !!currentSettings.discord.token,
@@ -743,16 +781,26 @@ export async function start(args: string[] = []) {
   const MAX_REPLAY_PER_JOB = 10;
 
   function fireJob(job: Job) {
-    resolvePrompt(job.prompt)
-      .then((prompt) => {
-        const clock = buildClockPromptPrefix(new Date(), currentSettings.timezoneOffsetMinutes);
-        return run(job.name, `${clock}\n${prompt}`, undefined, job.model);
-      })
-      .then((r) => {
-        if (job.notify === false) return;
-        if (job.notify === "error" && r.exitCode === 0) return;
-        forwardToAll(job.name, r);
-      })
+    snapshotJobFrontmatter(job.name)
+      .then((restoreFrontmatter) =>
+        resolvePrompt(job.prompt)
+          .then((prompt) => {
+            const clock = buildClockPromptPrefix(new Date(), currentSettings.timezoneOffsetMinutes);
+            return run(job.name, `${clock}\n${prompt}`, undefined, job.model);
+          })
+          .then(async (r) => {
+            const restored = await restoreFrontmatter();
+            if (restored) console.log(`[${ts()}] Restored overwritten frontmatter for job: ${job.name}`);
+            jobLastResult.set(job.name, {
+              result: r.exitCode === 0 ? "ok" : "error",
+              ranAt: Date.now(),
+            });
+            if (job.notify === false) return;
+            if (job.notify === "error" && r.exitCode === 0) return;
+            forwardToAll(job.name, r);
+          })
+      )
+      .catch((err) => console.error(`[${ts()}] Job ${job.name} error:`, err))
       .finally(async () => {
         if (job.recurring) return;
         try {
@@ -774,6 +822,12 @@ export async function start(args: string[] = []) {
   }
 
   async function runCronTick() {
+    if (isRateLimited()) {
+      // Skip job replay while rate-limited; refresh state.json so the
+      // statusline still ticks (nextAt timestamps).
+      updateState();
+      return;
+    }
     const now = new Date();
     const tz = currentSettings.timezoneOffsetMinutes;
     for (const job of currentJobs) {
