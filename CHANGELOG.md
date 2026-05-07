@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.4.0...claudeclaw-v1.4.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* gate auth before expensive work, async classifier, narrow rate-limit detection ([9534537](https://github.com/vinayh/claudeclaw/commit/95345378316088043c71f5a2d0606d22a01f9a28))
+
 ## [1.4.0](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.3.1...claudeclaw-v1.4.0) (2026-05-07)
 
 
