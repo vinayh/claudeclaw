@@ -68,6 +68,31 @@ export function extractSendFileDirectives(text: string): {
 }
 
 // ---------------------------------------------------------------------------
+// Referenced-message rendering (replies + forwards)
+// ---------------------------------------------------------------------------
+
+export interface ReferencedMessage {
+  authorName?: string;
+  content: string;
+  attachments?: string[];
+}
+
+function renderAttachments(attachments: string[] | undefined): string {
+  if (!attachments || attachments.length === 0) return "";
+  return ` [attachments: ${attachments.join(", ")}]`;
+}
+
+export function formatReplyContext(ref: ReferencedMessage): string {
+  const body = ref.content.trim() || "(no text)";
+  return `[In reply to ${ref.authorName ?? "unknown"}]: ${body}${renderAttachments(ref.attachments)}`;
+}
+
+export function formatForwardContext(ref: ReferencedMessage): string {
+  const body = ref.content.trim() || "(no text)";
+  return `[Forwarded message from ${ref.authorName ?? "unknown"}]: ${body}${renderAttachments(ref.attachments)}`;
+}
+
+// ---------------------------------------------------------------------------
 // Progress bar
 // ---------------------------------------------------------------------------
 

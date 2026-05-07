@@ -3,6 +3,7 @@ import {
   GatewayIntentBits,
   Partials,
   ChannelType,
+  MessageReferenceType,
   type Message,
   type Interaction,
   type Guild,
@@ -23,6 +24,8 @@ import {
   getContextUsage,
   formatContextUsage,
   formatSessionStatus,
+  formatReplyContext,
+  formatForwardContext,
 } from "../chat-utils";
 import {
   type PlatformAdapter,
@@ -298,6 +301,11 @@ async function handleMessageCreate(message: Message): Promise<void> {
     const isListenChannel = config.listenChannels.includes(channelId);
     const sessionKey = (isGuild && !isListenChannel) ? channelId : undefined;
 
+    // Capture quoted source: forwarded snapshot or replied-to message. A
+    // message is either a reply or a forward, never both, so the chat-handler
+    // renders at most one.
+    const { replyContext, forwardContext } = await extractQuotedContext(message);
+
     // Shared message handling pipeline (auth, commands, skill, prompt, run, response, errors)
     await handleChatMessage(adapter, {
       chatId: channelId,
@@ -307,6 +315,8 @@ async function handleMessageCreate(message: Message): Promise<void> {
       isDM,
       sessionKey,
       rawContent: cleanContent,
+      replyContext,
+      forwardContext,
       ...attachments,
     }, {
       allowedUserIds: config.allowedUserIds,
@@ -314,6 +324,55 @@ async function handleMessageCreate(message: Message): Promise<void> {
       failures: attachments.failures,
     });
   });
+}
+
+/**
+ * Extract pre-rendered context lines for a Discord message that's either a
+ * reply (message.reference.type === Default) or a forward (type === Forward,
+ * with the source content carried in messageSnapshots). Returns empty fields
+ * when neither applies or the source is unavailable.
+ */
+async function extractQuotedContext(message: Message): Promise<{
+  replyContext?: string;
+  forwardContext?: string;
+}> {
+  const ref = message.reference;
+  if (!ref) return {};
+
+  // Forwards: the source content rides on the message itself as a snapshot.
+  if (ref.type === MessageReferenceType.Forward) {
+    const snapshot = message.messageSnapshots?.first();
+    if (!snapshot) return {};
+    const attachments = snapshot.attachments ? Array.from(snapshot.attachments.values()).map((a) => a.name) : [];
+    return {
+      forwardContext: formatForwardContext({
+        // MessageSnapshot exposes author as nullable; Discord doesn't always carry it on forwards.
+        authorName: (snapshot as { author?: { username?: string } }).author?.username,
+        content: snapshot.content ?? "",
+        attachments,
+      }),
+    };
+  }
+
+  // Replies: must fetch the referenced message to get its content.
+  if (ref.messageId) {
+    try {
+      const referenced = await message.fetchReference();
+      const attachments = Array.from(referenced.attachments.values()).map((a) => a.name);
+      return {
+        replyContext: formatReplyContext({
+          authorName: referenced.author?.username,
+          content: referenced.content,
+          attachments,
+        }),
+      };
+    } catch (err) {
+      // Source message deleted or inaccessible — drop the context silently.
+      debugLog(`Failed to fetch replied-to message ${ref.messageId}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  return {};
 }
 
 // --- Interaction handler (slash commands + secretary buttons) ---

@@ -58,6 +58,10 @@ export interface ChatContext {
   threadId?: string;
   sessionKey?: string;
   rawContent: string;
+  /** Pre-rendered context line for a replied-to message, if the platform supplied one. */
+  replyContext?: string;
+  /** Pre-rendered context line for a forwarded message, if the platform supplied one. */
+  forwardContext?: string;
   imagePath: string | null;
   voicePath: string | null;
   voiceTranscript: string | null;
@@ -293,6 +297,14 @@ function buildPrompt(
     if (args) parts.push(`User arguments: ${args}`);
   } else if (ctx.rawContent.trim()) {
     parts.push(`Message: ${ctx.rawContent}`);
+  }
+
+  // Quoted context: replied-to / forwarded source message. A message is
+  // either a reply or a forward, not both, so at most one of these renders.
+  if (ctx.forwardContext) {
+    parts.push(ctx.forwardContext);
+  } else if (ctx.replyContext) {
+    parts.push(ctx.replyContext);
   }
 
   // Image
