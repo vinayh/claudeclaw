@@ -22,7 +22,6 @@ import "./statusline";
 import "./timezone";
 import "./chat-utils";
 import "./skills";
-import "./web";
 import "./runner";
 import "./whisper";
 
@@ -34,12 +33,6 @@ import "./commands/start";
 import "./commands/status";
 import "./commands/stop";
 import "./commands/telegram";
-
-// UI modules
-import "./ui/constants";
-import "./ui/http";
-import "./ui/server";
-import "./ui/types";
 
 describe("coverage instrumentation", () => {
   it("all source modules are imported", () => {

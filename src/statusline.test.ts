@@ -47,13 +47,11 @@ describe("writeState", () => {
       telegram: true,
       discord: false,
       startedAt: 1000,
-      web: { enabled: true, host: "0.0.0.0", port: 3000 },
     };
     await writeState(state);
     const raw = await readFile(STATE_FILE, "utf-8");
     const parsed = JSON.parse(raw.trim());
     expect(parsed.heartbeat.nextAt).toBe(1234567890);
-    expect(parsed.web.port).toBe(3000);
     expect(parsed.telegram).toBe(true);
   });
 });

@@ -154,7 +154,7 @@ Start the heartbeat daemon for this project. Follow these steps exactly:
             [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && \
             nvm use default && \
             export PATH="$HOME/.local/bin:${BREW_BIN}:$PATH" && \
-            exec bun run "${PLUGIN_ROOT}/src/index.ts" start --web'
+            exec bun run "${PLUGIN_ROOT}/src/index.ts" start'
           Restart=on-failure
           RestartSec=10
           StandardOutput=append:<PROJECT_DIR>/.claude/claudeclaw/logs/daemon.log
@@ -203,21 +203,16 @@ Start the heartbeat daemon for this project. Follow these steps exactly:
 
    **Otherwise (default — nohup)**, start via nohup:
    ```bash
-   mkdir -p .claude/claudeclaw/logs && nohup bun run ${CLAUDE_PLUGIN_ROOT}/src/index.ts start --web > .claude/claudeclaw/logs/daemon.log 2>&1 & echo $!
+   mkdir -p .claude/claudeclaw/logs && nohup bun run ${CLAUDE_PLUGIN_ROOT}/src/index.ts start > .claude/claudeclaw/logs/daemon.log 2>&1 & echo $!
    ```
    Use the description "Starting ClaudeClaw server" for this command.
    Note: nohup keeps the daemon running after the terminal closes, but it will NOT survive a reboot. Recommend systemd for persistent setups.
 
    **For both methods**: Wait 1 second, then check `cat .claude/claudeclaw/logs/daemon.log`. If it contains "Aborted: daemon already running", tell the user and exit.
-   - Read `.claude/claudeclaw/settings.json` for `web.port` (default `4632` if missing) and `web.host` (default `127.0.0.1`).
-   - Then try to open the dashboard directly:
-     - Linux: `xdg-open http://<HOST>:<PORT>`
-     - macOS: `open http://<HOST>:<PORT>`
-     - If open command fails, print the URL clearly so user can open it manually.
 
 7. **Capture session ID**: Read `.claude/claudeclaw/sessions.json` and extract `sessions.default.sessionId`. This is the default session used by the daemon for heartbeat, jobs, Telegram, and Discord `listenChannels`. Other Discord channels and threads each get their own dedicated session keyed by channel/thread ID in the same map.
 
-8. **Report**: Print the ASCII art below then show the PID, session, status info, Telegram bot next step, and the Web UI URL.
+8. **Report**: Print the ASCII art below then show the PID, session, status info, and Telegram bot next step.
 
 CRITICAL: Output the ASCII art block below EXACTLY as-is inside a markdown code block. Do NOT re-indent, re-align, or adjust ANY whitespace. Copy every character verbatim. Only replace `<PID>` and `<WORKING_DIR>` with actual values.
 
@@ -248,12 +243,6 @@ To get `<DISCORD_BOT_ID>`: read the daemon log for the bot's user ID (shown in t
 
 **To talk to your agent directly on Claude Code**
 `cd <WORKING_DIR> && claude --resume <SESSION_ID>`
-
-Show this direct Web UI URL:
-```bash
-http://<WEB_HOST>:<WEB_PORT>
-```
-Defaults: `WEB_HOST=127.0.0.1`, `WEB_PORT=4632` unless changed via settings or `--web-port`.
 
 ---
 

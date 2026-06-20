@@ -84,13 +84,6 @@ export const SettingsSchema = z
         disallowedTools: z.array(z.string()).catch([]),
       })
       .catch({ level: "moderate" as const, allowedTools: [], disallowedTools: [] }),
-    web: z
-      .object({
-        enabled: z.boolean().catch(false),
-        host: z.string().catch("127.0.0.1"),
-        port: z.number().finite().catch(4632),
-      })
-      .catch({ enabled: false, host: "127.0.0.1", port: 4632 }),
     stt: z
       .object({
         baseUrl: z.string().trim().catch(""),
@@ -146,12 +139,6 @@ export interface ModelConfig {
   api: string;
 }
 
-export interface WebConfig {
-  enabled: boolean;
-  host: string;
-  port: number;
-}
-
 export interface SttConfig {
   baseUrl: string;
   model: string;
@@ -168,7 +155,6 @@ export interface Settings {
   telegram: TelegramConfig;
   discord: DiscordConfig;
   security: SecurityConfig;
-  web: WebConfig;
   stt: SttConfig;
   sessionTimeoutMs: number;
 }
@@ -219,7 +205,6 @@ const DEFAULT_SETTINGS: Settings = {
   telegram: { token: "", allowedUserIds: [] },
   discord: { token: "", allowedUserIds: [], listenChannels: [] },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
-  web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
   sessionTimeoutMs: 300_000,
 };
@@ -325,7 +310,6 @@ export function parseSettings(raw: unknown, discordIds?: DiscordSnowflakes): Set
         : validated.discord.listenChannels,
     },
     security: validated.security,
-    web: validated.web,
     stt: validated.stt,
     sessionTimeoutMs: validated.sessionTimeoutMs,
   };

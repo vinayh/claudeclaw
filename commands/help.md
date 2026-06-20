@@ -24,7 +24,6 @@ Display this help information to the user:
 - `bun run src/index.ts start --trigger` — start daemon and run startup trigger once
 - `bun run src/index.ts start --prompt "text" --trigger` — start daemon and run startup trigger with custom prompt
 - Add `--telegram` with `--trigger` to forward startup trigger output to configured Telegram users
-- Add `--web` (optional `--web-port 4632`) to start a local dashboard with the daemon
 
 **Send command options (CLI):**
 - `bun run src/index.ts send "text"` — send to active daemon session

@@ -151,8 +151,8 @@ Rules:
 - Return ONLY valid JSON or the word null. No explanation.`;
 
   // Use Bun.spawn instead of execSync \u2014 execSync blocked the entire event
-  // loop for up to 15s, freezing Discord polling, Telegram polling, the
-  // heartbeat scheduler, and the web UI on every classifier invocation.
+  // loop for up to 15s, freezing Discord polling, Telegram polling, and the
+  // heartbeat scheduler on every classifier invocation.
   let proc: ReturnType<typeof Bun.spawn> | null = null;
   try {
     const input = `${systemPrompt}\n\n---\nUser message: ${text}`;

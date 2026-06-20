@@ -16,7 +16,6 @@ export interface StateData {
   telegram: boolean;
   discord: boolean;
   startedAt: number;
-  web?: { enabled: boolean; host: string; port: number };
 }
 
 export async function writeState(state: StateData) {

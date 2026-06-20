@@ -304,7 +304,6 @@ describe("SettingsSchema", () => {
     const result = SettingsSchema.parse({});
     expect(result.model).toBe("");
     expect(result.security.level).toBe("moderate");
-    expect(result.web.port).toBe(4632);
   });
 
   it("validates and trims string fields", () => {
@@ -331,11 +330,6 @@ describe("SettingsSchema", () => {
     expect(SettingsSchema.parse({ security: { level: "invalid" } }).security.level).toBe("moderate");
   });
 
-  it("validates web port is finite", () => {
-    expect(SettingsSchema.parse({ web: { port: 8080 } }).web.port).toBe(8080);
-    expect(SettingsSchema.parse({ web: { port: Infinity } }).web.port).toBe(4632);
-    expect(SettingsSchema.parse({ web: { port: "abc" } }).web.port).toBe(4632);
-  });
 
   it("parses sessionTimeoutMs with default", () => {
     const result = SettingsSchema.parse({});

@@ -36,10 +36,6 @@ Parse `$ARGUMENTS` to identify what the user wants. If no arguments are given, s
    - Allowed tools: (list or "default")
    - Disallowed tools: (list or "none")
 
-   **Web UI**
-   - Enabled: yes/no
-   - Address: host:port
-
 3. Also list any cron jobs from `.claude/claudeclaw/jobs/` with their name and schedule.
 4. Remind the user that changes are hot-reloaded every 30s — no daemon restart needed.
 
@@ -183,23 +179,6 @@ Add tools to the allowed or disallowed lists.
 3. Append to `security.allowedTools` or `security.disallowedTools` (deduplicated).
 4. Write and confirm.
 
-### `web on` / `web off` / `web enable` / `web disable`
-
-Toggle the web UI.
-
-1. Read `.claude/claudeclaw/settings.json`.
-2. Set `web.enabled` to `true` or `false`.
-3. Write and confirm.
-
-### `web port <port>` / `web host <host>`
-
-Configure web UI bind address or port.
-
-1. Parse the value from `$ARGUMENTS`.
-2. Read `.claude/claudeclaw/settings.json`.
-3. Set `web.port` (number) or `web.host` (string) accordingly.
-4. Write and confirm.
-
 ### `reset`
 
 Reset all settings to defaults.
@@ -231,7 +210,6 @@ Reset all settings to defaults.
      "telegram": { "token": "", "allowedUserIds": [] },
      "discord": { "token": "", "allowedUserIds": [], "listenChannels": [] },
      "security": { "level": "moderate", "allowedTools": [], "disallowedTools": [] },
-     "web": { "enabled": false, "host": "127.0.0.1", "port": 4632 },
      "stt": { "baseUrl": "", "model": "" },
      "sessionTimeoutMs": 300000
    }
@@ -272,11 +250,6 @@ Location: `.claude/claudeclaw/settings.json`
     "level": "moderate",
     "allowedTools": [],
     "disallowedTools": []
-  },
-  "web": {
-    "enabled": true,
-    "host": "127.0.0.1",
-    "port": 4632
   }
 }
 ```
@@ -302,8 +275,5 @@ Location: `.claude/claudeclaw/settings.json`
 | `security.level`           | string     | `locked` \| `strict` \| `moderate` \| `unrestricted` |
 | `security.allowedTools`    | string[]   | Extra tools to allow                           |
 | `security.disallowedTools` | string[]   | Tools to block                                 |
-| `web.enabled`              | boolean    | Whether the web UI is served                   |
-| `web.host`                 | string     | Bind address (default `127.0.0.1`)             |
-| `web.port`                 | number     | Port number (default `4632`)                   |
 
 The daemon hot-reloads this file every 30 seconds. No restart needed after changes.

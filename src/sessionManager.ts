@@ -4,7 +4,7 @@ import { existsSync } from "fs";
 import * as paths from "./paths";
 import { atomicWriteFile } from "./atomic-write";
 
-/** Key for the shared session used by heartbeat, cron, telegram, web UI, etc. */
+/** Key for the shared session used by heartbeat, cron, telegram, etc. */
 export const DEFAULT_SESSION_KEY = "default";
 
 export interface Session {

@@ -1,6 +1,6 @@
 # ClaudeClaw
 
-A daemon that wraps Claude Code CLI, adding Discord/Telegram integration, heartbeat monitoring, session management, and a web UI.
+A daemon that wraps Claude Code CLI, adding Discord/Telegram integration, heartbeat monitoring, and session management.
 
 ## Architecture
 

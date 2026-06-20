@@ -74,7 +74,7 @@ Then open a Claude Code session and run:
 ```
 /claudeclaw:start
 ```
-The setup wizard walks you through model, heartbeat, Telegram, Discord, and security, then your daemon is live with a web dashboard.
+The setup wizard walks you through model, heartbeat, Telegram, Discord, and security, then your daemon is live.
 
 ## What Would Be Built Next?
 
@@ -109,7 +109,6 @@ See [docs/MULTI_SESSION.md](docs/MULTI_SESSION.md) for technical details.
 
 ### Reliability and Control
 - **GLM Fallback:** Automatically continue with GLM models if your primary limit is reached.
-- **Web Dashboard:** Manage jobs, monitor runs, and inspect logs in real time.
 - **Security Levels:** Four access levels from read-only to full system access.
 - **Model Selection:** Switch models based on your workload.
 
@@ -151,9 +150,6 @@ See [docs/MULTI_SESSION.md](docs/MULTI_SESSION.md) for technical details.
 
 ### Claude Code Folder-Based Status Bar
 ![Claude Code folder-based status bar](images/bar.png)
-
-### Cool UI to Manage and Check Your ClaudeClaw
-![Cool UI to manage and check your ClaudeClaw](images/dashboard.png)
 
 ## Contributors (including to the upstream repo)
 

@@ -969,7 +969,7 @@ async function streamClaude(
   // --- Stale session / signature error recovery (stream path) ---
   // If --resume failed because the session is gone or its thinking blocks no
   // longer verify, back up the dead ID and retry once with a fresh session so
-  // the web UI doesn't render an empty bubble.
+  // the caller doesn't render an empty reply.
   if (
     existing &&
     !textEmitted &&
