@@ -330,6 +330,15 @@ describe("SettingsSchema", () => {
     expect(SettingsSchema.parse({ security: { level: "invalid" } }).security.level).toBe("moderate");
   });
 
+  it("parses optional telegram.whisperModel", () => {
+    expect(SettingsSchema.parse({ telegram: { whisperModel: " small.en " } }).telegram.whisperModel).toBe("small.en");
+    expect(SettingsSchema.parse({ telegram: {} }).telegram.whisperModel).toBeUndefined();
+    // A blank value is dropped without wiping sibling telegram fields.
+    const blank = SettingsSchema.parse({ telegram: { token: "abc", whisperModel: "  " } });
+    expect(blank.telegram.whisperModel).toBeUndefined();
+    expect(blank.telegram.token).toBe("abc");
+  });
+
 
   it("parses sessionTimeoutMs with default", () => {
     const result = SettingsSchema.parse({});

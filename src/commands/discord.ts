@@ -4,6 +4,8 @@ import {
   Partials,
   ChannelType,
   MessageReferenceType,
+  ApplicationCommandOptionType,
+  type ApplicationCommandDataResolvable,
   type Message,
   type Interaction,
   type Guild,
@@ -232,7 +234,13 @@ function guildTriggerReason(message: Message): string {
 
 // --- Message handler ---
 
-async function handleMessageCreate(message: Message): Promise<void> {
+// Discord delivers a forwarded message and its follow-up text comment as two
+// separate messageCreate events, which made the bot respond twice. When a pure
+// forward (empty content) arrives, hold it briefly keyed by channel+user so a
+// follow-up comment can absorb it as context.
+const pendingForwards = new Map<string, { message: Message; timer: ReturnType<typeof setTimeout> }>();
+
+async function handleMessageCreate(message: Message, skipCoalesce = false): Promise<void> {
   const config = getSettings().discord;
 
   if (message.author.bot) return;
@@ -252,7 +260,40 @@ async function handleMessageCreate(message: Message): Promise<void> {
   const hasImage = imageAttachments.size > 0;
   const hasVoice = voiceAttachments.size > 0;
 
-  if (!content.trim() && !hasImage && !hasVoice) return;
+  // A forward carries its source content as a snapshot, not in `content`, so a
+  // pure forward must not be dropped by the empty-content guard.
+  const isForward = message.reference?.type === MessageReferenceType.Forward;
+  const hasForward = isForward && !!message.messageSnapshots?.first();
+  if (!content.trim() && !hasImage && !hasVoice && !hasForward) return;
+
+  // Coalesce a pure forward with a follow-up comment from the same user+channel
+  // so the bot replies once, treating the forwarded message as quoted context.
+  const forwardKey = `${channelId}:${userId}`;
+  const isForwardOnly = hasForward && !content.trim() && !hasImage && !hasVoice;
+
+  if (!skipCoalesce && isForwardOnly) {
+    const existing = pendingForwards.get(forwardKey);
+    if (existing) clearTimeout(existing.timer);
+    const timer = setTimeout(() => {
+      pendingForwards.delete(forwardKey);
+      // skipCoalesce=true: no follow-up arrived, so respond to the forward
+      // alone without re-deferring (avoids an infinite timer loop).
+      handleMessageCreate(message, true).catch((err) =>
+        console.error(`[Discord] Deferred forward error: ${err instanceof Error ? err.message : err}`)
+      );
+    }, 1500);
+    pendingForwards.set(forwardKey, { message, timer });
+    return;
+  }
+
+  // A follow-up message absorbs any pending forward as quoted context.
+  let coalescedForwardMessage: Message | undefined;
+  const pending = pendingForwards.get(forwardKey);
+  if (pending && !isForwardOnly) {
+    clearTimeout(pending.timer);
+    pendingForwards.delete(forwardKey);
+    coalescedForwardMessage = pending.message;
+  }
 
   // Strip bot mention
   let cleanContent = content;
@@ -356,7 +397,7 @@ async function handleMessageCreate(message: Message): Promise<void> {
     // Capture quoted source: forwarded snapshot or replied-to message. A
     // message is either a reply or a forward, never both, so the chat-handler
     // renders at most one.
-    const { replyContext, forwardContext } = await extractQuotedContext(message);
+    const { replyContext, forwardContext } = await extractQuotedContext(coalescedForwardMessage ?? message);
 
     // Shared message handling pipeline (auth, commands, skill, prompt, run, response, errors)
     await handleChatMessage(adapter, {
@@ -464,9 +505,10 @@ async function handleInteractionCreate(interaction: Interaction): Promise<void> 
       return;
     }
 
-    // Use shared built-in command handler for /start, /reset, /status, /context
+    // Use shared built-in command handler for /start, /reset, /status, /context, /mode
     const chatId = interaction.channelId;
-    const handled = await handleBuiltInCommand(command, interactionAdapter, chatId);
+    const commandArgs = interaction.options.getString("mode") ?? undefined;
+    const handled = await handleBuiltInCommand(command, interactionAdapter, chatId, undefined, commandArgs);
     if (!handled) {
       await interaction.reply({ content: "Unknown command.", ephemeral: true });
     }
@@ -546,12 +588,29 @@ async function handleGuildCreate(guild: Guild): Promise<void> {
 async function registerSlashCommands(): Promise<void> {
   if (!client?.application) return;
 
-  const commands = [
+  const commands: ApplicationCommandDataResolvable[] = [
     { name: "start", description: "Show welcome message and usage instructions" },
     { name: "reset", description: "Reset the global session for a fresh start" },
     { name: "compact", description: "Compact session to reduce context size" },
     { name: "status", description: "Show current session status" },
     { name: "context", description: "Show context window usage" },
+    {
+      name: "mode",
+      description: "Set permission mode for following messages",
+      options: [
+        {
+          name: "mode",
+          description: "plan (read-only), edit (auto-accept edits), or unrestricted",
+          type: ApplicationCommandOptionType.String,
+          required: false,
+          choices: [
+            { name: "plan", value: "plan" },
+            { name: "edit", value: "edit" },
+            { name: "unrestricted", value: "unrestricted" },
+          ],
+        },
+      ],
+    },
   ];
 
   await client.application.commands.set(commands);

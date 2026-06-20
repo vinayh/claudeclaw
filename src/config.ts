@@ -68,6 +68,7 @@ export const SettingsSchema = z
       .object({
         token: z.string().catch(""),
         allowedUserIds: z.array(z.number()).catch([]),
+        whisperModel: z.string().trim().min(1).optional().catch(undefined),
       })
       .catch({ token: "", allowedUserIds: [] }),
     discord: z
@@ -111,6 +112,10 @@ export interface HeartbeatConfig {
 export interface TelegramConfig {
   token: string;
   allowedUserIds: number[];
+  /** Local whisper.cpp model for voice transcription. Default: "base.en".
+   *  Supported: tiny, base, small, medium, large-v3, large-v3-turbo (with or
+   *  without .en suffix). Ignored when stt.baseUrl is configured. */
+  whisperModel?: string;
 }
 
 export interface DiscordConfig {
@@ -302,6 +307,7 @@ export function parseSettings(raw: unknown, discordIds?: DiscordSnowflakes): Set
     telegram: {
       token: process.env.TELEGRAM_TOKEN || validated.telegram.token,
       allowedUserIds: validated.telegram.allowedUserIds,
+      ...(validated.telegram.whisperModel ? { whisperModel: validated.telegram.whisperModel } : {}),
     },
     discord: {
       token: process.env.DISCORD_TOKEN || validated.discord.token,

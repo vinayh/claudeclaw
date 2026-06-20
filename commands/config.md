@@ -272,6 +272,7 @@ Location: `.claude/claudeclaw/settings.json`
 | `heartbeat.forwardToTelegram`      | boolean | Forward heartbeat output to Telegram (`false` suppresses `HEARTBEAT_OK`) |
 | `telegram.token`           | string     | Bot token from @BotFather                      |
 | `telegram.allowedUserIds`  | number[]   | Telegram user IDs allowed to interact          |
+| `telegram.whisperModel`    | string     | whisper.cpp model for voice transcription (default `base.en`; ignored when `stt.baseUrl` is set) |
 | `discord.token`            | string     | Bot token from the Discord developer portal    |
 | `discord.allowedUserIds`   | string[]   | Discord user IDs allowed to interact           |
 | `discord.listenChannels`   | string[]   | Channel IDs the bot listens in (shared session)|

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
-import { existsSync } from "fs";
-import { LOGS_DIR, SESSIONS_DIR } from "./paths";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { LOGS_DIR, SESSIONS_DIR, HEARTBEAT_DIR, PERMISSION_MODE_FILE } from "./paths";
 import {
   DEFAULT_SESSION_KEY,
   getSession,
@@ -519,8 +519,37 @@ export async function ensureProjectClaudeMd(): Promise<void> {
   }
 }
 
+export type PermissionMode = "plan" | "acceptEdits" | "bypassPermissions";
+
+let cachedPermissionMode: PermissionMode | null = null;
+
+export function getPermissionMode(): PermissionMode {
+  if (cachedPermissionMode) return cachedPermissionMode;
+  try {
+    const raw = JSON.parse(readFileSync(PERMISSION_MODE_FILE, "utf8")) as { mode?: unknown };
+    if (raw.mode === "plan" || raw.mode === "acceptEdits" || raw.mode === "bypassPermissions") {
+      cachedPermissionMode = raw.mode;
+      return raw.mode;
+    }
+  } catch {}
+  return "bypassPermissions";
+}
+
+export function setPermissionMode(mode: PermissionMode): void {
+  cachedPermissionMode = mode;
+  try {
+    mkdirSync(HEARTBEAT_DIR, { recursive: true });
+    writeFileSync(PERMISSION_MODE_FILE, `${JSON.stringify({ mode }, null, 2)}\n`);
+  } catch (err) {
+    console.error("[runner] Failed to persist permission mode:", err);
+  }
+}
+
 export function buildSecurityArgs(security: SecurityConfig): string[] {
-  const args: string[] = ["--dangerously-skip-permissions"];
+  const permissionMode = getPermissionMode();
+  const args: string[] = permissionMode === "bypassPermissions"
+    ? ["--dangerously-skip-permissions"]
+    : ["--permission-mode", permissionMode];
 
   switch (security.level) {
     case "locked":

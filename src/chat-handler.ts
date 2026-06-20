@@ -13,6 +13,9 @@ import {
   compactCurrentSession,
   isRateLimited,
   getRateLimitResetAt,
+  getPermissionMode,
+  setPermissionMode,
+  type PermissionMode,
   type RunResult,
 } from "./runner";
 import { getSettings } from "./config";
@@ -165,7 +168,7 @@ export function checkAuthorization(userId: string | undefined, allowedIds: reado
 // Built-in command handling
 // ---------------------------------------------------------------------------
 
-const BUILT_IN_COMMANDS = new Set(["/start", "/reset", "/compact", "/status", "/context"]);
+const BUILT_IN_COMMANDS = new Set(["/start", "/reset", "/compact", "/status", "/context", "/mode"]);
 
 export function isBuiltInCommand(command: string | null): boolean {
   return command !== null && BUILT_IN_COMMANDS.has(command);
@@ -176,6 +179,7 @@ export async function handleBuiltInCommand(
   adapter: PlatformAdapter,
   chatId: string,
   threadId?: string,
+  args?: string,
 ): Promise<boolean> {
   if (command === "/start") {
     await adapter.sendMessage(
@@ -241,6 +245,44 @@ export async function handleBuiltInCommand(
         threadId,
       );
     }
+    return true;
+  }
+
+  if (command === "/mode") {
+    const modeMap: Record<string, PermissionMode> = {
+      plan: "plan",
+      edit: "acceptEdits",
+      unrestricted: "bypassPermissions",
+    };
+    const modeLabels: Record<PermissionMode, string> = {
+      plan: "plan",
+      acceptEdits: "edit",
+      bypassPermissions: "unrestricted",
+    };
+    const arg = (args ?? "").trim().toLowerCase();
+    if (!arg) {
+      const current = getPermissionMode();
+      await adapter.sendMessage(
+        chatId,
+        [
+          `Current mode: **${modeLabels[current]}**`,
+          "",
+          "Available modes:",
+          "- /mode plan — read-only planning",
+          "- /mode edit — auto-accept file edits",
+          "- /mode unrestricted — full permissions, no prompts",
+        ].join("\n"),
+        threadId,
+      );
+      return true;
+    }
+    const mode = modeMap[arg];
+    if (!mode) {
+      await adapter.sendMessage(chatId, `Unknown mode: ${arg}\n\nValid modes: plan, edit, unrestricted`, threadId);
+      return true;
+    }
+    setPermissionMode(mode);
+    await adapter.sendMessage(chatId, `Mode set to **${modeLabels[mode]}**. Takes effect on the next message.`, threadId);
     return true;
   }
 
@@ -470,7 +512,9 @@ export async function handleChatMessage(
 
   // Built-in commands
   if (!opts?.skipBuiltInCommands && isBuiltInCommand(command)) {
-    return handleBuiltInCommand(command!, adapter, ctx.chatId, ctx.threadId);
+    // Everything after the command token (drops "/cmd" and any "@botname").
+    const builtInArgs = ctx.rawContent.trim().split(/\s+/).slice(1).join(" ");
+    return handleBuiltInCommand(command!, adapter, ctx.chatId, ctx.threadId, builtInArgs);
   }
 
   // Reply immediately if a global rate-limit window is active — don't spend

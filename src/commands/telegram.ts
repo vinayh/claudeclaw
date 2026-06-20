@@ -219,23 +219,14 @@ function isAudioDocument(document?: TelegramDocument): boolean {
   return Boolean(document?.mime_type?.startsWith("audio/"));
 }
 
-const DOCUMENT_MIME_TYPES = new Set([
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/msword",
-  "application/vnd.ms-excel",
-  "application/vnd.ms-powerpoint",
-  "text/plain",
-  "text/csv",
-  "text/markdown",
-]);
-
+// Accept any file sent as a document. Images and audio are routed to their
+// dedicated paths (image inspection / voice transcription); everything else —
+// regardless of mime type, including a missing one — is handed to Claude as a
+// file on disk to read and process.
 function isDocumentAttachment(document?: TelegramDocument): boolean {
-  if (!document?.mime_type) return false;
+  if (!document) return false;
   if (isImageDocument(document) || isAudioDocument(document)) return false;
-  return DOCUMENT_MIME_TYPES.has(document.mime_type);
+  return true;
 }
 
 function pickLargestPhoto(photo: TelegramPhotoSize[]): TelegramPhotoSize {

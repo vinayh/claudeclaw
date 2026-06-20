@@ -68,5 +68,6 @@ Schedule uses standard cron syntax: `minute hour day-of-month month day-of-week`
 - `/compact` — compact the current session to reduce context size
 - `/status` — show default session and per-channel session summary
 - `/context` — show context usage for the default session
+- `/mode [plan|edit|unrestricted]` — show or set the Claude permission mode (no arg shows current)
 
 These are registered as native Discord slash commands and Telegram bot commands. Defined in `src/chat-handler.ts` (the `BUILT_IN_COMMANDS` set) and re-exposed by each platform in `src/commands/discord.ts` and `src/commands/telegram.ts`.
