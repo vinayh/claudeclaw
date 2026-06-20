@@ -314,6 +314,24 @@ export async function start(args: string[] = []) {
 
   await initConfig();
   const settings = await loadSettings();
+
+  // Fail closed: refuse to start a bot whose allowlist is empty. An empty
+  // allowedUserIds means "block everyone" (see checkAuthorization), so a
+  // configured-but-unrestricted bot is almost always a misconfiguration that
+  // would otherwise silently ignore every message.
+  for (const platform of ["telegram", "discord"] as const) {
+    const cfg = settings[platform];
+    if (cfg.token && cfg.allowedUserIds.length === 0) {
+      console.error(
+        `\x1b[31mAborted: ${platform} token is configured but ${platform}.allowedUserIds is empty.\x1b[0m`
+      );
+      console.error(
+        `An empty allowlist blocks everyone. Add your user ID to ${platform}.allowedUserIds in settings.json, or remove the ${platform} token to disable it.`
+      );
+      process.exit(1);
+    }
+  }
+
   await ensureProjectClaudeMd();
   const jobs = await loadJobs();
 

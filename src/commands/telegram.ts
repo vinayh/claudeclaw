@@ -15,6 +15,7 @@ import {
   logIncomingMessage,
   withTypingIndicator,
 } from "../chat-handler";
+import { wrapUntrusted } from "../prompt-safety";
 
 // --- Markdown → Telegram HTML conversion (ported from nanobot) ---
 
@@ -560,15 +561,25 @@ async function handleMyChatMember(update: TelegramMyChatMemberUpdate): Promise<v
 
   if (!isGroup || !wasOut || !isIn) return;
 
+  // Fail closed: if an unauthorized user added the bot, leave instead of
+  // greeting. An empty allowlist blocks everyone (the daemon refuses to start
+  // with a configured token but no allowed users — see start.ts).
+  const adderId = update.from.id;
+  if (config.allowedUserIds.length === 0 || !config.allowedUserIds.includes(adderId)) {
+    console.log(`[Telegram] Unauthorized add to ${chat.id} by ${adderId}; leaving.`);
+    await callApi(config.token, "leaveChat", { chat_id: chat.id }).catch(() => {});
+    return;
+  }
+
   const chatName = chat.title ?? String(chat.id);
   console.log(`[Telegram] Added to ${chat.type}: ${chatName} (${chat.id}) by ${update.from.id}`);
 
   const addedBy = update.from.username ?? `${update.from.first_name} (${update.from.id})`;
   const eventPrompt =
     `[Telegram system event] I was added to a ${chat.type}.\n` +
-    `Group title: ${chatName}\n` +
+    `Group title: ${wrapUntrusted("group-title", chatName)}\n` +
     `Group id: ${chat.id}\n` +
-    `Added by: ${addedBy}\n` +
+    `Added by: ${wrapUntrusted("adder-username", addedBy)}\n` +
     "Write a short first message for the group. It should confirm I was added and explain how to trigger me.";
 
   try {
@@ -640,8 +651,10 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
   // unauthorized user replying to a bot message in a group could drive the
   // secretary "custom reply" flow, and any group member could trigger media
   // downloads. handleChatMessage still re-checks as defense in depth.
+  // Fail closed: an empty allowlist blocks everyone (see checkAuthorization /
+  // the start.ts startup guard).
   const allowedIds = config.allowedUserIds;
-  if (allowedIds.length > 0 && (userId === undefined || !allowedIds.includes(userId))) {
+  if (userId === undefined || allowedIds.length === 0 || !allowedIds.includes(userId)) {
     if (isPrivate) {
       await sendMessage(config.token, chatId, "Unauthorized.", threadId).catch((err) =>
         console.error(`[Telegram] Failed to send unauthorized reply: ${err instanceof Error ? err.message : err}`)

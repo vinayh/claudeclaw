@@ -33,8 +33,8 @@ function mockAdapter(overrides?: Partial<PlatformAdapter>): PlatformAdapter {
 // ---------------------------------------------------------------------------
 
 describe("checkAuthorization", () => {
-  it("returns true when allowedIds is empty (all users allowed)", () => {
-    expect(checkAuthorization("any-user", [])).toBe(true);
+  it("fails closed: returns false when allowedIds is empty (block everyone)", () => {
+    expect(checkAuthorization("any-user", [])).toBe(false);
   });
 
   it("returns true when userId is in allowedIds", () => {

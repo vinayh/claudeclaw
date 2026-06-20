@@ -19,6 +19,7 @@ import { getSettings } from "./config";
 import { resetDefaultSession, peekDefaultSession, listSessions } from "./sessionManager";
 import { resolveSkillPrompt } from "./skills";
 import { transcribeAudioToText } from "./whisper";
+import { wrapUntrusted } from "./prompt-safety";
 import {
   type ChatPlatform,
   extractReactionDirective,
@@ -153,7 +154,10 @@ export async function downloadAndTranscribe(
 
 export function checkAuthorization(userId: string | undefined, allowedIds: readonly string[]): boolean {
   if (!userId) return false;
-  if (allowedIds.length === 0) return true;
+  // Fail closed: an empty allowlist blocks everyone rather than allowing all.
+  // The daemon refuses to start with a configured bot token but no allowed
+  // users (see start.ts), so a live bot always has a non-empty list here.
+  if (allowedIds.length === 0) return false;
   return allowedIds.includes(userId);
 }
 
@@ -294,9 +298,9 @@ function buildPrompt(
     const args = ctx.rawContent.trim().slice(command.length).trim();
     parts.push(`<command-name>${command}</command-name>`);
     parts.push(skillContext);
-    if (args) parts.push(`User arguments: ${args}`);
+    if (args) parts.push(`User arguments: ${wrapUntrusted("args", args)}`);
   } else if (ctx.rawContent.trim()) {
-    parts.push(`Message: ${ctx.rawContent}`);
+    parts.push(`Message: ${wrapUntrusted("msg", ctx.rawContent)}`);
   }
 
   // Quoted context: replied-to / forwarded source message. A message is
@@ -317,7 +321,7 @@ function buildPrompt(
 
   // Voice
   if (ctx.voiceTranscript) {
-    parts.push(`Voice transcript: ${ctx.voiceTranscript}`);
+    parts.push(`Voice transcript: ${wrapUntrusted("voice", ctx.voiceTranscript)}`);
     parts.push("The user attached voice audio. Use the transcript as their spoken message.");
   } else if (failures.voice) {
     parts.push("The user attached voice audio, but it could not be transcribed. Respond and ask them to resend a clearer clip.");
@@ -326,7 +330,7 @@ function buildPrompt(
   // Document
   if (ctx.documentInfo) {
     parts.push(`Document path: ${ctx.documentInfo.localPath}`);
-    parts.push(`Original filename: ${ctx.documentInfo.originalName}`);
+    parts.push(`Original filename: ${wrapUntrusted("filename", ctx.documentInfo.originalName)}`);
     parts.push("The user attached a document. Read and process this file directly.");
   } else if (failures.document) {
     parts.push("The user attached a document, but downloading it failed. Respond and ask them to resend.");

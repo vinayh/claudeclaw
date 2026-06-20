@@ -30,12 +30,14 @@ import {
 import {
   type PlatformAdapter,
   type ChatContext,
+  checkAuthorization,
   downloadAndTranscribe,
   handleBuiltInCommand,
   handleChatMessage,
   logIncomingMessage,
   withTypingIndicator,
 } from "../chat-handler";
+import { wrapUntrusted } from "../prompt-safety";
 
 // --- Module state ---
 
@@ -267,7 +269,8 @@ async function handleMessageCreate(message: Message): Promise<void> {
   // a `claude` subprocess), and previously every guild-channel message — even
   // from non-allowed users — would trigger them, letting any guild member burn
   // API tokens. handleChatMessage still re-checks as defense in depth.
-  if (config.allowedUserIds.length > 0 && !config.allowedUserIds.includes(userId)) {
+  // Fail closed: an empty allowlist blocks everyone (see checkAuthorization).
+  if (!checkAuthorization(userId, config.allowedUserIds)) {
     if (isDM) {
       await adapter.sendMessage(channelId, "Unauthorized.").catch((err) =>
         console.error(`[Discord] Failed to send unauthorized DM reply: ${err}`)
@@ -431,7 +434,7 @@ async function handleInteractionCreate(interaction: Interaction): Promise<void> 
 
   if (interaction.isChatInputCommand()) {
     const actorId = interaction.user.id;
-    if (config.allowedUserIds.length > 0 && !config.allowedUserIds.includes(actorId)) {
+    if (!checkAuthorization(actorId, config.allowedUserIds)) {
       await interaction.reply({ content: "Unauthorized.", ephemeral: true });
       return;
     }
@@ -502,6 +505,13 @@ async function handleInteractionCreate(interaction: Interaction): Promise<void> 
 async function handleGuildCreate(guild: Guild): Promise<void> {
   const config = getSettings().discord;
 
+  // Fail closed: only greet guilds explicitly listed in allowedGuilds. An
+  // unauthorized server that adds the bot gets silence, not a welcome message.
+  if (!config.allowedGuilds.includes(guild.id)) {
+    console.log(`[Discord] Ignoring guild ${guild.name} (${guild.id}) — not in allowedGuilds`);
+    return;
+  }
+
   const channel = guild.systemChannel;
   if (!channel) return;
 
@@ -515,7 +525,7 @@ async function handleGuildCreate(guild: Guild): Promise<void> {
 
   const eventPrompt =
     `[Discord system event] I was added to a guild.\n` +
-    `Guild name: ${guild.name}\n` +
+    `Guild name: ${wrapUntrusted("guild", guild.name)}\n` +
     `Guild id: ${guild.id}\n` +
     "Write a short first message for the server. Confirm I was added and explain how to trigger me (mention or reply).";
 

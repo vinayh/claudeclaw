@@ -22,6 +22,7 @@ import "./statusline";
 import "./timezone";
 import "./chat-utils";
 import "./skills";
+import "./prompt-safety";
 import "./runner";
 import "./whisper";
 

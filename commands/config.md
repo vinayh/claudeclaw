@@ -208,7 +208,7 @@ Reset all settings to defaults.
        "forwardToTelegram": true
      },
      "telegram": { "token": "", "allowedUserIds": [] },
-     "discord": { "token": "", "allowedUserIds": [], "listenChannels": [] },
+     "discord": { "token": "", "allowedUserIds": [], "listenChannels": [], "allowedGuilds": [] },
      "security": { "level": "moderate", "allowedTools": [], "disallowedTools": [] },
      "stt": { "baseUrl": "", "model": "" },
      "sessionTimeoutMs": 300000
@@ -272,8 +272,14 @@ Location: `.claude/claudeclaw/settings.json`
 | `heartbeat.forwardToTelegram`      | boolean | Forward heartbeat output to Telegram (`false` suppresses `HEARTBEAT_OK`) |
 | `telegram.token`           | string     | Bot token from @BotFather                      |
 | `telegram.allowedUserIds`  | number[]   | Telegram user IDs allowed to interact          |
+| `discord.token`            | string     | Bot token from the Discord developer portal    |
+| `discord.allowedUserIds`   | string[]   | Discord user IDs allowed to interact           |
+| `discord.listenChannels`   | string[]   | Channel IDs the bot listens in (shared session)|
+| `discord.allowedGuilds`    | string[]   | Guild IDs the bot will greet on join           |
 | `security.level`           | string     | `locked` \| `strict` \| `moderate` \| `unrestricted` |
 | `security.allowedTools`    | string[]   | Extra tools to allow                           |
 | `security.disallowedTools` | string[]   | Tools to block                                 |
+
+**Allowlists fail closed.** An empty `allowedUserIds` blocks *everyone* — it does not mean "allow all". The daemon refuses to start when a bot token is set but its `allowedUserIds` is empty. Discord guilds not listed in `allowedGuilds` are ignored on join (no welcome message).
 
 The daemon hot-reloads this file every 30 seconds. No restart needed after changes.

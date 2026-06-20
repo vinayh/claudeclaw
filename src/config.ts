@@ -75,8 +75,9 @@ export const SettingsSchema = z
         token: z.string().trim().catch(""),
         allowedUserIds: z.array(z.unknown()).transform((arr) => arr.map(String)).catch([]),
         listenChannels: z.array(z.unknown()).transform((arr) => arr.map(String)).catch([]),
+        allowedGuilds: z.array(z.unknown()).transform((arr) => arr.map(String)).catch([]),
       })
-      .catch({ token: "", allowedUserIds: [], listenChannels: [] }),
+      .catch({ token: "", allowedUserIds: [], listenChannels: [], allowedGuilds: [] }),
     security: z
       .object({
         level: z.enum(SECURITY_LEVELS).catch("moderate"),
@@ -116,6 +117,7 @@ export interface DiscordConfig {
   token: string;
   allowedUserIds: string[];
   listenChannels: string[];
+  allowedGuilds: string[];
 }
 
 export type SecurityLevel = (typeof SECURITY_LEVELS)[number];
@@ -203,7 +205,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezoneOffsetMinutes: 0,
   heartbeat: { enabled: false, interval: 15, prompt: "", excludeWindows: [], forwardToTelegram: true },
   telegram: { token: "", allowedUserIds: [] },
-  discord: { token: "", allowedUserIds: [], listenChannels: [] },
+  discord: { token: "", allowedUserIds: [], listenChannels: [], allowedGuilds: [] },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   stt: { baseUrl: "", model: "" },
   sessionTimeoutMs: 300_000,
@@ -274,6 +276,7 @@ export function parseAgenticConfig(raw: unknown): AgenticConfig {
 interface DiscordSnowflakes {
   allowedUserIds: string[];
   listenChannels: string[];
+  allowedGuilds: string[];
 }
 
 /** @internal Exported for testing. */
@@ -308,6 +311,9 @@ export function parseSettings(raw: unknown, discordIds?: DiscordSnowflakes): Set
       listenChannels: discordIds?.listenChannels && discordIds.listenChannels.length > 0
         ? discordIds.listenChannels
         : validated.discord.listenChannels,
+      allowedGuilds: discordIds?.allowedGuilds && discordIds.allowedGuilds.length > 0
+        ? discordIds.allowedGuilds
+        : validated.discord.allowedGuilds,
     },
     security: validated.security,
     stt: validated.stt,
@@ -328,6 +334,7 @@ export async function loadSettings({ force = false }: { force?: boolean } = {}):
   cached = parseSettings(raw, {
     allowedUserIds: extractSnowflakeArray(rawText, "allowedUserIds"),
     listenChannels: extractSnowflakeArray(rawText, "listenChannels"),
+    allowedGuilds: extractSnowflakeArray(rawText, "allowedGuilds"),
   });
   return cached;
 }

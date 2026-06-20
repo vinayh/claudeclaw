@@ -381,11 +381,12 @@ describe("parseSettings", () => {
 
   it("uses discordIds override when provided", () => {
     const result = parseSettings(
-      { discord: { allowedUserIds: ["111"], listenChannels: ["222"] } },
-      { allowedUserIds: ["999"], listenChannels: ["888"] },
+      { discord: { allowedUserIds: ["111"], listenChannels: ["222"], allowedGuilds: ["333"] } },
+      { allowedUserIds: ["999"], listenChannels: ["888"], allowedGuilds: ["777"] },
     );
     expect(result.discord.allowedUserIds).toEqual(["999"]);
     expect(result.discord.listenChannels).toEqual(["888"]);
+    expect(result.discord.allowedGuilds).toEqual(["777"]);
   });
 
   it("falls back to validated discord IDs when no discordIds override", () => {
