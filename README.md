@@ -76,6 +76,8 @@ Then open a Claude Code session and run:
 ```
 The setup wizard walks you through model, heartbeat, Telegram, Discord, and security, then your daemon is live.
 
+To keep the daemon running across reboots on Linux, see [docs/SYSTEMD.md](docs/SYSTEMD.md).
+
 ## What Would Be Built Next?
 
 > **Mega Post:** Help shape the next ClaudeClaw features.
