@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.0](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.4.1...claudeclaw-v2.0.0) (2026-06-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **security:** an empty allowedUserIds now blocks all users instead of allowing all, and the daemon will not start a bot whose allowlist is empty. Populate telegram.allowedUserIds / discord.allowedUserIds (and discord.allowedGuilds for server greetings) before upgrading.
+* the web dashboard, the `--web`/`--web-port` flags, and the `web.*` settings keys no longer exist. Manage the daemon via the Telegram/Discord bots, slash commands, and settings.json.
+
+### Features
+
+* backport whisper-model config, /mode, Telegram any-file, Discord forward coalescing ([4dfef20](https://github.com/vinayh/claudeclaw/commit/4dfef2072a7e9c7692609e9183cb0b07d8b84bb6))
+* **security:** fail-closed allowlists + untrusted-content wrapping ([9506bb9](https://github.com/vinayh/claudeclaw/commit/9506bb90e1ee9742f8c9a129c1b57176f397329a))
+
+
+### Code Refactoring
+
+* remove web dashboard ([8459b6b](https://github.com/vinayh/claudeclaw/commit/8459b6bd4760251f2ec15a9951032212cb8b7420))
+
 ## [1.4.1](https://github.com/vinayh/claudeclaw/compare/claudeclaw-v1.4.0...claudeclaw-v1.4.1) (2026-05-07)
 
 
