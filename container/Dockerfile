@@ -1,5 +1,5 @@
 # ClaudeClaw — self-contained, isolated Claude CLI + curated plugins.
-# Phase 7 of the Podman-quadlet migration (docs/podman-quadlet-migration.md §13).
+# Packages this fork as a rootless OCI image; see container/README.md.
 #
 # Design:
 #  - bun (oven base) runs the claudeclaw daemon; Node 22 (NodeSource) runs the

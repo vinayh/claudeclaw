@@ -1,12 +1,52 @@
-# container/ — deployment image
+# container/ — containerized ClaudeClaw
 
-Self-contained build context for running this fork as a rootless container (the vbot host's
-Phase-7 claudeclaw image). Builds a pinned Claude Code CLI + the curated plugin set, with `~/.claude`
-as a host volume seeded on first run by `entrypoint.sh`.
+A self-contained build context that packages this fork as a rootless OCI image: a pinned
+Claude Code CLI plus the curated plugin set, ready to run as a daemon under Podman or Docker.
+No host-specific coupling — any Podman/Docker host works.
 
-The plugin code is installed at build time from the GitHub marketplaces (incl. `vinayh/claudeclaw`),
-so the build is reproducible from a checkout of this repo plus these two files.
+## Design
 
-Built by the `claudeclaw.build` quadlet in the [vbot](https://github.com/vinayh/vbot) repo
-(`SetWorkingDirectory` → this directory). See vbot's `docs/podman-quadlet-migration.md` §13 for the
-full design.
+- **bun** (the `oven/bun` base) runs the ClaudeClaw daemon; **Node 22** (NodeSource) runs the
+  Claude Code CLI the daemon shells out to (claude-code is a Node app).
+- The curated plugins (`claudeclaw`, `ralph-loop`, `claude-mem`) are installed at **build** time
+  from their GitHub marketplaces and staged to `/opt/claude-home`. At runtime `~/.claude` is a host
+  volume; `entrypoint.sh` seeds it from `/opt` on first run (`cp -rn`), so OAuth credentials and
+  state persist on the volume while plugin **code** ships in the image.
+- Runs as non-root user `claude` (uid 1000). The whole container `HOME` (`/home/claude`) is a
+  single host mount and the entrypoint runs with cwd = `HOME`, so the daemon's `cwd/.claude` *is*
+  `~/.claude` — one unified tree (data, plugins, transcripts, OAuth, and `claude-mem`'s SQLite
+  store under `~/.claude-mem`).
+
+## Build
+
+```sh
+podman build -t claudeclaw ./container      # or: docker build -t claudeclaw ./container
+```
+
+`CLAUDE_VERSION` (build-arg) pins the Claude Code CLI version — bump it to upgrade.
+
+## Run
+
+Mount a persistent host dir as the container home and supply a Discord token:
+
+```sh
+podman run -d --name claudeclaw \
+  -v ~/data/claudeclaw:/home/claude:rw \
+  -e DISCORD_TOKEN=... \
+  claudeclaw
+```
+
+First run needs a one-time interactive login to create `~/.claude/.credentials.json` (persists on
+the volume, refreshes automatically thereafter):
+
+```sh
+podman exec -it claudeclaw claude     # then run /login (device-code OAuth)
+```
+
+## Notes
+
+- Plugin **code** lives in the image. To pick up rebuilt plugins, clear the mounted
+  `~/.claude/plugins` (or the whole home volume) so the entrypoint re-seeds from `/opt`.
+- The `oven/bun` base ships a uid-1000 `bun` user; the Dockerfile removes it so `claude` can claim
+  1000. Map it to your host user with `--userns=keep-id:uid=1000,gid=1000` (rootless Podman) so
+  mounted files stay owned by you.

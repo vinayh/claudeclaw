@@ -14,7 +14,7 @@ mkdir -p "$HOME/.claude-mem"
 # one unified tree (the whole HOME is a single host mount: ~/data/claudeclaw).
 cd "$HOME"
 
-# Resolve the installed claudeclaw plugin path (mirrors the old host unit).
+# Resolve the installed claudeclaw plugin path, then run the daemon from it.
 INSTALL_PATH="$(jq -r '.plugins["claudeclaw@claudeclaw"][0].installPath' \
   "$HOME/.claude/plugins/installed_plugins.json")"
 if [ -z "$INSTALL_PATH" ] || [ ! -f "$INSTALL_PATH/src/index.ts" ]; then
