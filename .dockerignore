@@ -1,0 +1,11 @@
+# Build context = repo root (container/Dockerfile copies the source in for the
+# local claudeclaw marketplace). Keep the context to the plugin's runtime files.
+.git
+node_modules
+coverage
+images
+.github
+.claude
+.codemachine
+.DS_Store
+*.log

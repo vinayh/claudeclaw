@@ -4,11 +4,15 @@
 # Design:
 #  - bun (oven base) runs the claudeclaw daemon; Node 22 (NodeSource) runs the
 #    Claude Code CLI that the daemon shells out to (claude-code is a Node app).
-#  - The 3 curated plugins (claudeclaw, ralph-loop, claude-mem) are installed at
-#    BUILD time from their GitHub marketplaces, then staged to /opt/claude-home.
-#    The runtime ~/.claude is a host volume; entrypoint.sh seeds it from /opt on
+#  - The 3 curated plugins are installed at BUILD time and staged to
+#    /opt/claude-home: claudeclaw itself is built from THIS repo (a local
+#    marketplace, so the image always matches the checkout you build), while
+#    ralph-loop + claude-mem come from their public GitHub marketplaces. The
+#    runtime ~/.claude is a host volume; entrypoint.sh seeds it from /opt on
 #    first run (cp -rn), so OAuth creds + state persist while plugin CODE ships in
 #    the image.
+#  - BUILD CONTEXT IS THE REPO ROOT (build with `-f container/Dockerfile .`); the
+#    repo source is copied in for the local claudeclaw marketplace.
 #  - claude-mem's DATA dir (~/.claude-mem, the SQLite memory store) is a SEPARATE
 #    host mount — code in the image, data on the host.
 FROM docker.io/oven/bun:1-debian
@@ -37,9 +41,15 @@ ENV HOME=/home/claude
 ENV CI=true
 ENV IS_SANDBOX=1
 
-# Install the curated plugin set from their marketplaces (public GitHub repos).
-# Plugin install pulls each plugin's own deps; claude-mem is the heavy one.
-RUN claude plugin marketplace add vinayh/claudeclaw \
+# Copy this repo's source in so claudeclaw installs from a LOCAL marketplace
+# (matches the checkout being built, not GitHub main). .dockerignore keeps this
+# to the plugin's runtime files (no .git/node_modules/coverage/etc).
+COPY --chown=claude:claude . /opt/claudeclaw-src
+
+# Install the curated plugin set. claudeclaw from the local marketplace above;
+# ralph-loop + claude-mem from their public GitHub marketplaces. Plugin install
+# pulls each plugin's own deps; claude-mem is the heavy one.
+RUN claude plugin marketplace add /opt/claudeclaw-src \
  && claude plugin marketplace add anthropics/claude-plugins-official \
  && claude plugin marketplace add thedotmack/claude-mem \
  && claude plugin install claudeclaw@claudeclaw --scope user \
@@ -66,7 +76,7 @@ RUN INSTALL_PATH="$(jq -r '.plugins["claudeclaw@claudeclaw"][0].installPath' \
 USER root
 RUN cp -a /home/claude/.claude /opt/claude-home \
  && chown -R claude:claude /opt/claude-home
-COPY --chown=claude:claude entrypoint.sh /opt/entrypoint.sh
+COPY --chown=claude:claude container/entrypoint.sh /opt/entrypoint.sh
 RUN chmod +x /opt/entrypoint.sh
 
 USER claude

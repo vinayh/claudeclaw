@@ -19,11 +19,15 @@ No host-specific coupling — any Podman/Docker host works.
 
 ## Build
 
+The build context is the **repo root** — claudeclaw is installed from this checkout (a local
+marketplace), so the image always matches the code you build. Run from the repo root:
+
 ```sh
-podman build -t claudeclaw ./container      # or: docker build -t claudeclaw ./container
+podman build -f container/Dockerfile -t claudeclaw .   # or: docker build -f container/Dockerfile -t claudeclaw .
 ```
 
-`CLAUDE_VERSION` (build-arg) pins the Claude Code CLI version — bump it to upgrade.
+`CLAUDE_VERSION` (build-arg) pins the Claude Code CLI version — bump it to upgrade. `ralph-loop`
+and `claude-mem` are still pulled from their public GitHub marketplaces at build time.
 
 ## Run
 
