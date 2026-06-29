@@ -26,7 +26,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Pinned Claude Code CLI (matches the host at authoring; bump to rebuild).
-ARG CLAUDE_VERSION=2.1.185
+ARG CLAUDE_VERSION=2.1.195
 RUN npm i -g @anthropic-ai/claude-code@${CLAUDE_VERSION}
 
 # Non-root runtime user; its HOME holds the container's OWN ~/.claude.
